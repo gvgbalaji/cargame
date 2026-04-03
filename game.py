@@ -168,7 +168,7 @@ class Renderer:
 
         # Trees scroll at road speed. cycle = 3 (tree) + 6 (gap) = 9
         CYCLE = 9
-        off = int(scroll * 1.5) % CYCLE
+        off = int(scroll) % CYCLE
 
         for y in range(1, self.h - 1):
             # Tree column 1
