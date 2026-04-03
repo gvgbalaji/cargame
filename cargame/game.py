@@ -24,7 +24,7 @@ class Game:
 
     def _reset(self) -> None:
         self.player_lane = 1
-        self.player_y    = self.r.h - CAR_H - 2
+        self.player_y    = self.r.h - CAR_H - 6
         self.enemies: list[Enemy] = []
         self.score       = 0
         self.level       = 1

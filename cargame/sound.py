@@ -57,17 +57,38 @@ def play_crash_sound() -> None:
 
 
 def play_pass_sound() -> None:
-    """Short ascending chirp when a car is successfully dodged."""
+    """'Zrrrr' engine buzz with Doppler drop as enemy car rushes past."""
     try:
         RATE = 22050
-        n    = int(RATE * 0.12)
+        dur  = 0.20
+        n    = int(RATE * dur)
+        rng  = random.Random(1)
         raw  = []
+        phase_acc = 0.0
         for i in range(n):
-            t    = i / RATE
-            freq = 440 + 440 * (t / 0.12)
-            amp  = 0.5 * (1 - t / 0.12) ** 0.5
-            raw.append(int(max(-32767, min(32767,
-                        math.sin(2 * math.pi * freq * t) * amp * 32767))))
+            t = i / RATE
+            p = t / dur                          # 0 → 1 progress
+
+            # Doppler: pitch higher as car approaches, drops as it passes
+            freq      = 140 - 70 * p            # 140 Hz → 70 Hz
+            phase_acc = (phase_acc + freq / RATE) % 1.0
+
+            # Sawtooth wave — gives the raw "rrr" engine buzz texture
+            buzz  = 2 * phase_acc - 1
+
+            # Light broadband noise for the wind/tyre hiss layer
+            noise = rng.uniform(-1, 1) * 0.25
+
+            # Amplitude envelope: fast attack, sustain, fast fade
+            if p < 0.08:
+                amp = p / 0.08
+            elif p > 0.80:
+                amp = (1.0 - p) / 0.20
+            else:
+                amp = 1.0
+
+            s = (buzz * 0.65 + noise) * amp * 0.75
+            raw.append(int(max(-32767, min(32767, s * 32767))))
         _play_wav(raw, RATE)
     except Exception:
         pass
