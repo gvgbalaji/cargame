@@ -4,7 +4,7 @@ import curses
 import random
 import time
 
-from .constants import CAR_H, CAR_W, NUM_LANES, PLAYER_ART, CP_RED, CP_YELLOW, lane_x
+from .constants import CAR_H, CAR_W, CP_YELLOW, NUM_LANES, PLAYER_ART, CP_RED, lane_x
 from .enemy import Enemy
 from .renderer import Renderer
 from .sound import play_crash_sound, play_pass_sound
@@ -14,10 +14,11 @@ class Game:
     FPS        = 20
     FRAME_TIME = 1.0 / FPS
 
-    def __init__(self, scr):
-        self.scr        = scr
-        self.r          = Renderer(scr)
-        self.best_score = 0
+    def __init__(self, scr, player_color: int = CP_YELLOW):
+        self.scr          = scr
+        self.r            = Renderer(scr)
+        self.best_score   = 0
+        self.player_color = player_color
 
     # ── session reset ────────────────────────────────────────────
 
@@ -97,7 +98,7 @@ class Game:
             self.r.car(e.art, e.x, e.y, e.color)
         px = lane_x(self.player_lane)
         self.r.speed_streaks(px, self.player_y, self.level)
-        self.r.car(PLAYER_ART, px, self.player_y, CP_YELLOW, bold=True)
+        self.r.car(PLAYER_ART, px, self.player_y, self.player_color, bold=True)
         self.r.hud(self.score, self.level)
         self.r.sidebar(self.score, self.best_score, self.level, self._speed)
         if self.party_timer > 0:
@@ -118,16 +119,17 @@ class Game:
         self.r.scenery(self.scroll)
         self.r.car(PLAYER_ART, lane_x(self.player_lane),
                    self.player_y, CP_RED, bold=True)
-        self.r.game_over_box(self.score, self.level)
+        self.r.game_over_box(self.score, self.level, self.player_color)
         self.scr.refresh()
 
     # ── public API ───────────────────────────────────────────────
 
-    def play(self) -> bool:
+    def play(self) -> str:
         """
         Run one game session.
-        Returns True  → player wants to restart.
-        Returns False → player wants to quit.
+        Returns "restart"   → play again with same colour
+                "customize" → go back to the colour picker
+                "quit"      → exit
         """
         self._reset()
         self.scr.nodelay(True)
@@ -136,7 +138,7 @@ class Game:
             t0 = time.monotonic()
 
             if not self._handle_input():
-                return False
+                return "quit"
 
             self._update()
             self._draw()
@@ -154,6 +156,8 @@ class Game:
         while True:
             k = self.scr.getch()
             if k in (ord("r"), ord("R")):
-                return True
+                return "restart"
+            if k in (ord("c"), ord("C")):
+                return "customize"
             if k in (ord("q"), ord("Q")):
-                return False
+                return "quit"

@@ -11,8 +11,9 @@ No external packages required — uses Python stdlib only.
 
 import curses
 
+from cargame.constants import CP_YELLOW
 from cargame.game import Game
-from cargame.screens import setup_colors, size_ok, splash
+from cargame.screens import customization_screen, setup_colors, size_ok, splash
 
 
 def main(stdscr) -> None:
@@ -24,9 +25,16 @@ def main(stdscr) -> None:
     if not splash(stdscr):
         return
 
-    game = Game(stdscr)
-    while game.play():
-        pass
+    player_color = customization_screen(stdscr)
+    game         = Game(stdscr, player_color)
+
+    while True:
+        result = game.play()
+        if result == "quit":
+            break
+        if result == "customize":
+            player_color      = customization_screen(stdscr)
+            game.player_color = player_color
 
 
 if __name__ == "__main__":

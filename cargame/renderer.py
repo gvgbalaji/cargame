@@ -147,27 +147,32 @@ class Renderer:
 
     # ── game-over overlay ────────────────────────────────────────
 
-    def game_over_box(self, score: int, level: int) -> None:
+    def game_over_box(self, score: int, level: int,
+                      player_color: int = CP_WHITE) -> None:
         box = [
-            "+------------------------------------+",
-            "|                                    |",
-            "|         *** GAME OVER ***           |",
-            "|                                    |",
-            f"|   Final Score  : {score:<5d}               |",
-            f"|   Level Reached: {level:<3d}                 |",
-            "|                                    |",
-            "|   [R] Play Again     [Q] Quit       |",
-            "|                                    |",
-            "+------------------------------------+",
+            "+--------------------------------------+",
+            "|                                      |",
+            "|          *** GAME OVER ***            |",
+            "|                                      |",
+            f"|   Final Score  : {score:<5d}                 |",
+            f"|   Level Reached: {level:<3d}                   |",
+            "|                                      |",
+            "|  [R] Again   [C] Colour   [Q] Quit   |",
+            "|                                      |",
+            "+--------------------------------------+",
         ]
         bh = len(box)
         sy = self.h // 2 - bh // 2
         sx = self.w // 2 - len(box[0]) // 2
 
         for i, line in enumerate(box):
-            color = CP_RED if i in (0, 2, bh - 1) else CP_WHITE
-            self._put(sy + i, sx, line,
-                      curses.color_pair(color) | curses.A_BOLD)
+            if i in (0, 2, bh - 1):
+                color, extra = CP_RED, curses.A_BOLD
+            elif i == 7:
+                color, extra = player_color, curses.A_BOLD
+            else:
+                color, extra = CP_WHITE, curses.A_BOLD
+            self._put(sy + i, sx, line, curses.color_pair(color) | extra)
 
     # ── speed effects ────────────────────────────────────────────
 

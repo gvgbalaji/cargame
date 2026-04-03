@@ -30,10 +30,11 @@ CP_MAGENTA = 6
 CP_WHITE   = 7
 
 # ── Car artwork (7 wide × 3 tall) ──────────────────────────────
+# Player: top-down sedan view — hood crease (╤/╧), windshield glass (░), rearview mirror (▴)
 PLAYER_ART = [
-    "╔══╦══╗",
-    "║  ★  ║",
-    "╚══╩══╝",
+    "╔══╤══╗",   # front bumper + hood centre crease
+    "║░ ▴ ░║",   # windshield glass + rearview mirror stalk
+    "╚══╧══╝",   # rear bumper + trunk line
 ]
 
 ENEMY_ARTS = [
@@ -45,6 +46,16 @@ ENEMY_ARTS = [
 ]
 
 ENEMY_COLORS = [CP_RED, CP_MAGENTA, CP_CYAN, CP_BLUE]
+
+# ── Player colour picker options ────────────────────────────────
+PLAYER_COLOR_OPTIONS: list[tuple[str, int]] = [
+    ("YELLOW",  CP_YELLOW),
+    ("CYAN",    CP_CYAN),
+    ("GREEN",   CP_GREEN),
+    ("MAGENTA", CP_MAGENTA),
+    ("WHITE",   CP_WHITE),
+    ("RED",     CP_RED),
+]
 
 LEVEL_TIPS = [
     "Stay focused! ",
