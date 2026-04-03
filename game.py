@@ -12,8 +12,14 @@ No external packages required - uses Python stdlib only.
 """
 
 import curses
+import io
+import math
 import random
+import struct
+import subprocess
+import tempfile
 import time
+import wave
 
 # ── Road layout ────────────────────────────────────────────────
 ROAD_LEFT   = 6       # x-column of left road edge
@@ -81,6 +87,53 @@ ENEMY_ARTS = [
 ]
 
 ENEMY_COLORS = [CP_RED, CP_MAGENTA, CP_CYAN, CP_BLUE]
+
+
+# ── Crash sound ────────────────────────────────────────────────
+def play_crash_sound() -> None:
+    """
+    Generate and play a crash sound effect using stdlib only.
+    Produces a short WAV (noise burst + descending rumble) and
+    launches aplay (Linux) / afplay (macOS) non-blocking.
+    Silently skips if audio tools are unavailable.
+    """
+    try:
+        RATE = 22050
+        n    = int(RATE * 0.65)
+        rng  = random.Random(0)
+
+        raw = []
+        for i in range(n):
+            t = i / RATE
+            if t < 0.15:                          # impact noise burst
+                s = rng.uniform(-1, 1) * (1 - t / 0.15) ** 0.4 * 0.9
+            else:                                 # descending rumble
+                freq = 150 * math.exp(-(t - 0.15) * 3)
+                s    = (math.sin(2 * math.pi * freq * t)
+                        * math.exp(-(t - 0.15) * 7) * 0.8)
+            raw.append(int(max(-32767, min(32767, s * 32767))))
+
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(RATE)
+            wf.writeframes(struct.pack(f"<{n}h", *raw))
+
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            f.write(buf.getvalue())
+            path = f.name
+
+        for cmd in (["aplay", "-q", path], ["afplay", path]):
+            try:
+                subprocess.Popen(cmd,
+                                 stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+                break
+            except FileNotFoundError:
+                continue
+    except Exception:
+        pass
 
 
 # ── Helpers ────────────────────────────────────────────────────
@@ -445,6 +498,8 @@ class Game:
         if self.score > self.best_score:
             self.best_score = self.score
 
+        play_crash_sound()
+        curses.beep()        # terminal bell fallback
         self.r.flash(CP_RED)
 
         self.scr.erase()
