@@ -28,6 +28,27 @@ CAR_H = 3
 MIN_COLS = ROAD_LEFT + ROAD_WIDTH + 12
 MIN_ROWS = 24
 
+# ── Right-side scenery layout (relative to road_right = 42) ────
+GRASS_EXTRA_W = 10          # wider grass strip
+TREE_COL_1    = 14          # offset from road_right
+TREE_COL_2    = 19          # offset from road_right (staggered)
+SIDEBAR_X_OFF = 24          # offset from road_right where panel starts
+SIDEBAR_IW    = 16          # inner width of panel (border = iw+2 = 18)
+SIDEBAR_H     = 16          # rows tall
+
+LEVEL_TIPS = [
+    "Stay focused! ",
+    "Eyes on road! ",
+    "Keep dodging! ",
+    "Don't blink!  ",
+    "Speed rising! ",
+    "Heart pounding",
+    "DANGER AHEAD! ",
+    "Nerves of steel",
+    "Nearly insane!",
+    "MAX SPEED!!!  ",
+]
+
 # ── Color pair IDs ─────────────────────────────────────────────
 CP_RED     = 1
 CP_GREEN   = 2
@@ -118,9 +139,9 @@ class Renderer:
         offset     = int(scroll) % 4
 
         for y in range(1, self.h - 1):
-            # Grass strips
+            # Grass strips (left + extended right)
             self._put(y, 0,             "~~~~  ", curses.color_pair(CP_GREEN))
-            self._put(y, road_right + 2, "  ~~~~", curses.color_pair(CP_GREEN))
+            self._put(y, road_right + 2, "~" * GRASS_EXTRA_W, curses.color_pair(CP_GREEN))
 
             # Barrier walls
             self._put(y, ROAD_LEFT - 2, "||", curses.color_pair(CP_MAGENTA) | curses.A_BOLD)
@@ -131,6 +152,83 @@ class Renderer:
                 lx = ROAD_LEFT + lane * LANE_WIDTH
                 if (y + offset) % 4 < 2:
                     self._ch(y, lx, "|", curses.color_pair(CP_WHITE) | curses.A_DIM)
+
+    # scrolling right-side scenery -----------------------------------
+    def scenery(self, scroll: float):
+        road_right = ROAD_LEFT + ROAD_WIDTH
+        tx1 = road_right + TREE_COL_1
+        tx2 = road_right + TREE_COL_2
+
+        # Trees scroll at road speed. cycle = 3 (tree) + 6 (gap) = 9
+        CYCLE = 9
+        off = int(scroll * 1.5) % CYCLE
+
+        for y in range(1, self.h - 1):
+            # Tree column 1
+            self._draw_tree_row(y, tx1, (y + off) % CYCLE)
+            # Tree column 2 (staggered by half cycle)
+            self._draw_tree_row(y, tx2, (y + off + CYCLE // 2) % CYCLE)
+
+    def _draw_tree_row(self, y: int, x: int, ty: int):
+        if ty == 0:
+            self._put(y, x, " * ", curses.color_pair(CP_GREEN) | curses.A_BOLD)
+        elif ty == 1:
+            self._put(y, x, "***", curses.color_pair(CP_GREEN))
+        elif ty == 2:
+            self._put(y, x, " | ", curses.color_pair(CP_YELLOW) | curses.A_DIM)
+
+    # stats sidebar --------------------------------------------------
+    def sidebar(self, score: int, best: int, level: int, speed: float):
+        road_right = ROAD_LEFT + ROAD_WIDTH
+        sx = road_right + SIDEBAR_X_OFF
+        if sx + SIDEBAR_IW + 2 > self.w:
+            return   # terminal not wide enough
+
+        iw = SIDEBAR_IW
+        sy = max(1, self.h // 2 - SIDEBAR_H // 2)
+
+        # Speed gauge
+        MAX_SPEED  = 0.25 + 14 * 0.12
+        speed_pct  = min((speed - 0.25) / max(MAX_SPEED - 0.25, 0.01), 1.0)
+        bar_len    = iw - 4   # leave room for " [...]"
+        bar_filled = int(speed_pct * bar_len)
+        bar_str    = "|" * bar_filled + "." * (bar_len - bar_filled)
+        bar_color  = CP_RED if speed_pct > 0.65 else CP_YELLOW
+
+        # Tip based on level
+        tip = LEVEL_TIPS[min(level - 1, len(LEVEL_TIPS) - 1)]
+
+        cars_to_next = 5 - (score % 5)
+
+        sep  = "+" + "-" * iw + "+"
+        top  = "+" + "=" * iw + "+"
+
+        def row(content: str) -> str:
+            return f"|{content:<{iw}}|"
+
+        lines = [
+            (top,                                       CP_YELLOW, curses.A_BOLD),
+            (row(f"{'  CAR  DODGE':^{iw}}"),            CP_YELLOW, curses.A_BOLD),
+            (top,                                       CP_YELLOW, curses.A_BOLD),
+            (row(f" SCORE  {score:05d}   "),            CP_WHITE,  curses.A_BOLD),
+            (row(f" BEST   {best:05d}   "),             CP_CYAN,   0),
+            (sep,                                       CP_WHITE,  curses.A_DIM),
+            (row(f" LEVEL  {level:02d}       "),        CP_GREEN,  curses.A_BOLD),
+            (row(f" NEXT   {cars_to_next} car{'s' if cars_to_next != 1 else ' '}  "), CP_WHITE, curses.A_DIM),
+            (sep,                                       CP_WHITE,  curses.A_DIM),
+            (row(f" SPEED          "),                  CP_WHITE,  0),
+            (row(f" [{bar_str}] "),                     bar_color, curses.A_BOLD),
+            (sep,                                       CP_WHITE,  curses.A_DIM),
+            (row(f" {tip}"),                            CP_RED if speed_pct > 0.65 else CP_GREEN,
+                                                        curses.A_BOLD | (curses.A_BLINK if speed_pct > 0.85 else 0)),
+            (sep,                                       CP_WHITE,  curses.A_DIM),
+            (row(f" [</A] left      "),                 CP_WHITE,  curses.A_DIM),
+            (row(f" [>/D] right     "),                 CP_WHITE,  curses.A_DIM),
+            (top,                                       CP_YELLOW, curses.A_BOLD),
+        ]
+
+        for i, (text, color, extra) in enumerate(lines):
+            self._put(sy + i, sx, text, curses.color_pair(color) | extra)
 
     # cars -----------------------------------------------------------
     def car(self, art, x: int, y: float, color: int, bold: bool = False):
@@ -194,8 +292,9 @@ class Game:
     FRAME_TIME = 1.0 / FPS
 
     def __init__(self, scr):
-        self.scr = scr
-        self.r   = Renderer(scr)
+        self.scr       = scr
+        self.r         = Renderer(scr)
+        self.best_score = 0
 
     # ------------------------------------------------------------------
     def _reset(self):
@@ -269,11 +368,13 @@ class Game:
     def _draw(self):
         self.scr.erase()
         self.r.road(self.scroll)
+        self.r.scenery(self.scroll)
         for e in self.enemies:
             self.r.car(e.art, e.x, e.y, e.color)
         self.r.car(PLAYER_ART, lane_x(self.player_lane),
                    self.player_y, CP_YELLOW, bold=True)
         self.r.hud(self.score, self.level)
+        self.r.sidebar(self.score, self.best_score, self.level, self._speed)
         self.scr.refresh()
 
     # ------------------------------------------------------------------
@@ -304,10 +405,14 @@ class Game:
                 time.sleep(gap)
 
         # ── Crash sequence ──────────────────────────────────────────
+        if self.score > self.best_score:
+            self.best_score = self.score
+
         self.r.flash(CP_RED)
 
         self.scr.erase()
         self.r.road(self.scroll)
+        self.r.scenery(self.scroll)
         # Draw player in red at crash position
         self.r.car(PLAYER_ART, lane_x(self.player_lane),
                    self.player_y, CP_RED, bold=True)
