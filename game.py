@@ -58,19 +58,26 @@ CP_CYAN    = 5
 CP_MAGENTA = 6
 CP_WHITE   = 7
 
-# ── Car artwork (7 wide × 3 tall) ─────────────────────────────
+# ── Car artwork (7 wide × 3 tall, box-drawing style) ──────────
+# Player: top-down rear view with exhaust pipes
 PLAYER_ART = [
-    "  /=\\  ",
-    " |[*]| ",
-    "  \\=/  ",
+    "╔══╦══╗",
+    "║  ★  ║",
+    "╚══╩══╝",
 ]
 
+# Enemies: front view with headlights (they face us head-on)
 ENEMY_ARTS = [
-    ["  /=\\  ", " |[X]| ", "  \\=/  "],
-    ["  /-\\  ", " |(#)| ", "  \\-/  "],
-    ["  /^\\  ", " |{!}| ", "  \\^/  "],
-    ["  /~\\  ", " |[%]| ", "  \\~/  "],
-    ["  /+\\  ", " |[?]| ", "  \\+/  "],
+    # Sedan – round headlights
+    ["╔═════╗", "║ ● ● ║", "╚══╦══╝"],
+    # SUV – grille bar
+    ["╔═╦═╦═╗", "╠═════╣", "╚═════╝"],
+    # Sports car – block fog lights
+    ["╔═════╗", "║█   █║", "╚══╦══╝"],
+    # Van – solid front
+    ["╔═════╗", "║▓▓▓▓▓║", "╚═════╝"],
+    # Racer – low stance with diffuser
+    ["╔═════╗", "╠ ● ● ╣", "╚═╦═╦═╝"],
 ]
 
 ENEMY_COLORS = [CP_RED, CP_MAGENTA, CP_CYAN, CP_BLUE]
@@ -139,19 +146,19 @@ class Renderer:
         offset     = int(scroll) % 4
 
         for y in range(1, self.h - 1):
-            # Grass strips (left + extended right)
-            self._put(y, 0,             "~~~~  ", curses.color_pair(CP_GREEN))
-            self._put(y, road_right + 2, "~" * GRASS_EXTRA_W, curses.color_pair(CP_GREEN))
+            # Textured grass (░ shade blocks look like grass)
+            self._put(y, 0,              "░░░░  ", curses.color_pair(CP_GREEN))
+            self._put(y, road_right + 2, "░" * GRASS_EXTRA_W, curses.color_pair(CP_GREEN))
 
-            # Barrier walls
-            self._put(y, ROAD_LEFT - 2, "||", curses.color_pair(CP_MAGENTA) | curses.A_BOLD)
-            self._put(y, road_right,    "||", curses.color_pair(CP_MAGENTA) | curses.A_BOLD)
+            # Solid highway barriers (yellow concrete style)
+            self._put(y, ROAD_LEFT - 2, "██", curses.color_pair(CP_YELLOW) | curses.A_BOLD)
+            self._put(y, road_right,    "██", curses.color_pair(CP_YELLOW) | curses.A_BOLD)
 
-            # Scrolling lane dividers
+            # Scrolling dashed lane dividers (yellow road markings)
             for lane in range(1, NUM_LANES):
                 lx = ROAD_LEFT + lane * LANE_WIDTH
                 if (y + offset) % 4 < 2:
-                    self._ch(y, lx, "|", curses.color_pair(CP_WHITE) | curses.A_DIM)
+                    self._ch(y, lx, "|", curses.color_pair(CP_YELLOW) | curses.A_DIM)
 
     # scrolling right-side scenery -----------------------------------
     def scenery(self, scroll: float):
@@ -170,12 +177,13 @@ class Renderer:
             self._draw_tree_row(y, tx2, (y + off + CYCLE // 2) % CYCLE)
 
     def _draw_tree_row(self, y: int, x: int, ty: int):
+        # Triangle tree: tip ▲, canopy ▲▲▲, trunk █
         if ty == 0:
-            self._put(y, x, " * ", curses.color_pair(CP_GREEN) | curses.A_BOLD)
+            self._put(y, x, " ▲ ", curses.color_pair(CP_GREEN) | curses.A_BOLD)
         elif ty == 1:
-            self._put(y, x, "***", curses.color_pair(CP_GREEN))
+            self._put(y, x, "▲▲▲", curses.color_pair(CP_GREEN))
         elif ty == 2:
-            self._put(y, x, " | ", curses.color_pair(CP_YELLOW) | curses.A_DIM)
+            self._put(y, x, " █ ", curses.color_pair(CP_YELLOW) | curses.A_DIM)
 
     # stats sidebar --------------------------------------------------
     def sidebar(self, score: int, best: int, level: int, speed: float):
@@ -274,6 +282,33 @@ class Renderer:
             self._put(sy + i, sx, line,
                       curses.color_pair(color) | curses.A_BOLD)
 
+    # speed streaks behind player ------------------------------------
+    def speed_streaks(self, player_x: int, player_y: int, level: int):
+        """Vertical motion-blur streaks trailing below the player car."""
+        if level < 2:
+            return
+        streak_len = min(level * 2, 10)
+        attr = curses.color_pair(CP_CYAN) | curses.A_DIM
+        for i in range(1, streak_len + 1):
+            row = player_y + CAR_H + i - 1
+            if 1 <= row < self.h - 1:
+                self._put(row, player_x,         "│     │", attr)
+
+    # road particles at high speed -----------------------------------
+    def road_particles(self, scroll: float, level: int):
+        """Fast-moving road specks that appear above level 4."""
+        if level < 4:
+            return
+        # Particles scroll at 3× road speed
+        fast = (scroll * 3) % (self.h - 2)
+        xs   = [ROAD_LEFT + 2, ROAD_LEFT + 9, ROAD_LEFT + 18,
+                ROAD_LEFT + 27, ROAD_LEFT + 33]
+        attr = curses.color_pair(CP_WHITE) | curses.A_DIM
+        for px in xs:
+            for gap in range(0, self.h, 7):
+                py = int(fast + gap) % (self.h - 2) + 1
+                self._ch(py, px, "·", attr)
+
     # crash flash -----------------------------------------------------
     def flash(self, color: int, count: int = 4):
         attr = curses.color_pair(color) | curses.A_REVERSE
@@ -368,11 +403,13 @@ class Game:
     def _draw(self):
         self.scr.erase()
         self.r.road(self.scroll)
+        self.r.road_particles(self.scroll, self.level)
         self.r.scenery(self.scroll)
         for e in self.enemies:
             self.r.car(e.art, e.x, e.y, e.color)
-        self.r.car(PLAYER_ART, lane_x(self.player_lane),
-                   self.player_y, CP_YELLOW, bold=True)
+        px = lane_x(self.player_lane)
+        self.r.speed_streaks(px, self.player_y, self.level)
+        self.r.car(PLAYER_ART, px, self.player_y, CP_YELLOW, bold=True)
         self.r.hud(self.score, self.level)
         self.r.sidebar(self.score, self.best_score, self.level, self._speed)
         self.scr.refresh()
