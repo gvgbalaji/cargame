@@ -30,11 +30,12 @@ CP_MAGENTA = 6
 CP_WHITE   = 7
 
 # ── Car artwork (7 wide × 3 tall) ──────────────────────────────
-# Player: top-down sedan view — hood crease (╤/╧), windshield glass (░), rearview mirror (▴)
+# Player: top-down sedan view — rounded body (╭╮╰╯), windshield (░░), mirror (▴)
+# Matches the rounded red car silhouette: curved front/rear, glass panels visible
 PLAYER_ART = [
-    "╔══╤══╗",   # front bumper + hood centre crease
-    "║░ ▴ ░║",   # windshield glass + rearview mirror stalk
-    "╚══╧══╝",   # rear bumper + trunk line
+    "╭─░░░─╮",   # rounded front hood + windshield glass
+    "│ ─▴─ │",   # cabin roof + rearview mirror stalk
+    "╰─░░░─╯",   # rounded rear + rear window glass
 ]
 
 ENEMY_ARTS = [

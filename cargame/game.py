@@ -36,7 +36,7 @@ class Game:
 
     @property
     def _speed(self) -> float:
-        return 0.25 + (self.level - 1) * 0.12
+        return 0.37 + (self.level - 1) * 0.12
 
     @property
     def _spawn_interval(self) -> int:

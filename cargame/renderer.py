@@ -84,8 +84,9 @@ class Renderer:
 
         iw          = SIDEBAR_IW
         sy          = max(1, self.h // 2 - SIDEBAR_H // 2)
-        MAX_SPEED   = 0.25 + 14 * 0.12
-        speed_pct   = min((speed - 0.25) / max(MAX_SPEED - 0.25, 0.01), 1.0)
+        BASE_SPEED  = 0.37
+        MAX_SPEED   = BASE_SPEED + 14 * 0.12
+        speed_pct   = min((speed - BASE_SPEED) / max(MAX_SPEED - BASE_SPEED, 0.01), 1.0)
         bar_len     = iw - 4
         bar_str     = "|" * int(speed_pct * bar_len) + "." * (bar_len - int(speed_pct * bar_len))
         bar_color   = CP_RED if speed_pct > 0.65 else CP_YELLOW
