@@ -136,6 +136,42 @@ def play_crash_sound() -> None:
         pass
 
 
+def play_pass_sound() -> None:
+    """Short ascending chirp when a car is successfully dodged."""
+    try:
+        RATE = 22050
+        n    = int(RATE * 0.12)
+        raw  = []
+        for i in range(n):
+            t    = i / RATE
+            freq = 440 + 440 * (t / 0.12)          # sweep 440 → 880 Hz
+            amp  = 0.5 * (1 - t / 0.12) ** 0.5     # quick fade
+            raw.append(int(max(-32767, min(32767,
+                        math.sin(2 * math.pi * freq * t) * amp * 32767))))
+
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(RATE)
+            wf.writeframes(struct.pack(f"<{n}h", *raw))
+
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            f.write(buf.getvalue())
+            path = f.name
+
+        for cmd in (["aplay", "-q", path], ["afplay", path]):
+            try:
+                subprocess.Popen(cmd,
+                                 stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+                break
+            except FileNotFoundError:
+                continue
+    except Exception:
+        pass
+
+
 # ── Helpers ────────────────────────────────────────────────────
 def setup_colors():
     curses.start_color()
@@ -362,6 +398,39 @@ class Renderer:
                 py = int(fast + gap) % (self.h - 2) + 1
                 self._ch(py, px, "·", attr)
 
+    # party poppers at score milestones ------------------------------
+    CONFETTI_CHARS = list("*+·✦★°╋●◆▲")
+    CONFETTI_COLORS = [CP_RED, CP_YELLOW, CP_CYAN, CP_MAGENTA, CP_GREEN, CP_WHITE]
+
+    def party_poppers(self, party_frame: int) -> None:
+        """Animate confetti/streamers on the right side for ~2 s (40 frames)."""
+        road_right = ROAD_LEFT + ROAD_WIDTH
+        x_start    = road_right + 2          # right of road edge
+        x_end      = min(self.w - 1, road_right + SIDEBAR_X_OFF - 1)
+        if x_end <= x_start:
+            return
+
+        # Use deterministic randomness so chars don't flicker chaotically
+        rng     = random.Random(party_frame // 3)   # re-seed every 3 frames
+        density = max(4, 18 - party_frame // 2)     # more particles early on
+
+        for _ in range(density):
+            y  = rng.randint(1, self.h - 2)
+            x  = rng.randint(x_start, x_end - 1)
+            ch = rng.choice(self.CONFETTI_CHARS)
+            cp = rng.choice(self.CONFETTI_COLORS)
+            self._ch(y, x, ch,
+                     curses.color_pair(cp) | curses.A_BOLD)
+
+        # "MILESTONE!" banner in the grass strip area
+        if party_frame < 20:
+            msg   = " MILESTONE! "
+            bx    = road_right + 2
+            by    = self.h // 2
+            battr = (curses.color_pair(CP_YELLOW) | curses.A_BOLD
+                     | (curses.A_BLINK if party_frame < 10 else 0))
+            self._put(by, bx, msg, battr)
+
     # crash flash -----------------------------------------------------
     def flash(self, color: int, count: int = 4):
         attr = curses.color_pair(color) | curses.A_REVERSE
@@ -394,6 +463,7 @@ class Game:
         self.level       = 1
         self.scroll      = 0.0
         self.spawn_cd    = 14   # frames until first spawn
+        self.party_timer = 0    # counts down after score milestone
 
     # ------------------------------------------------------------------
     @property
@@ -422,6 +492,9 @@ class Game:
                 e.passed = True
                 self.score += 1
                 self.level  = 1 + self.score // 5
+                play_pass_sound()
+                if self.score % 20 == 0:
+                    self.party_timer = 40   # ~2 s at 20 fps
 
         # Prune off-screen
         self.enemies = [e for e in self.enemies if e.y < self.r.h + CAR_H]
@@ -465,6 +538,9 @@ class Game:
         self.r.car(PLAYER_ART, px, self.player_y, CP_YELLOW, bold=True)
         self.r.hud(self.score, self.level)
         self.r.sidebar(self.score, self.best_score, self.level, self._speed)
+        if self.party_timer > 0:
+            self.r.party_poppers(40 - self.party_timer)
+            self.party_timer -= 1
         self.scr.refresh()
 
     # ------------------------------------------------------------------
