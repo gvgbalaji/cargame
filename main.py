@@ -1,46 +1,47 @@
 #!/usr/bin/env python3
 """
-CAR DODGE — Terminal Car Dodging Game
+CAR DODGE — Pygame Car Dodging Game
 Dodge oncoming cars for as long as you can!
 
 Usage:
     python main.py
-
-No external packages required — uses Python stdlib only.
 """
 
-import curses
+import pygame
 
+from cargame.constants import WIDTH, HEIGHT, TITLE
 from cargame.game import Game
-from cargame.screens import customization_screen, setup_colors, size_ok, splash
-from cargame.sound import set_sound_config
+from cargame.screens import splash, customization_screen
+from cargame.sound import init_mixer, set_sound_config
 
 
-def main(stdscr) -> None:
-    setup_colors()
-    curses.curs_set(0)
+def main():
+    pygame.init()
+    init_mixer()
 
-    if not size_ok(stdscr):
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    pygame.display.set_caption(TITLE)
+
+    if not splash(screen):
+        pygame.quit()
         return
-    if not splash(stdscr):
-        return
 
-    skin_index, sound_theme = customization_screen(stdscr)
-    game = Game(stdscr, skin_index, sound_theme)
+    skin_index, sound_theme = customization_screen(screen)
+    game = Game(screen, skin_index, sound_theme)
 
     while True:
         result = game.play()
         if result == "quit":
             break
         if result == "customize":
-            skin_index, sound_theme = customization_screen(stdscr)
+            skin_index, sound_theme = customization_screen(screen)
             game.set_skin(skin_index)
-            set_sound_config(enabled=(sound_theme != "silent"), theme=sound_theme)
+            set_sound_config(enabled=(sound_theme != "silent"),
+                             theme=sound_theme)
+
+    pygame.quit()
+    print("\nThanks for playing Car Dodge!  Drive safe.")
 
 
 if __name__ == "__main__":
-    try:
-        curses.wrapper(main)
-    except KeyboardInterrupt:
-        pass
-    print("\nThanks for playing Car Dodge!  Drive safe. 🚗")
+    main()

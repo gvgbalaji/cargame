@@ -1,304 +1,266 @@
-"""Splash screen, size check, and curses initialisation."""
+"""Splash screen, customization screen (Pygame version)."""
 
-import curses
-import time
+import math
+import pygame
 
 from .constants import (
-    CAR_W, CAR_H, CP_CYAN, CP_GREEN, CP_RED, CP_WHITE, CP_YELLOW,
-    MIN_COLS, MIN_ROWS, PLAYER_ART, CAR_SKINS, SOUND_THEMES,
+    WIDTH, HEIGHT, FPS,
+    COL_HUD_BG, COL_HUD_BORDER, COL_HUD_TEXT, COL_HUD_ACCENT,
+    COL_HUD_WARN, COL_HUD_GOOD, COL_HUD_GOLD, COL_HUD_DIM,
+    COL_PLAYER_COLORS, SOUND_THEMES,
+    COL_ASPHALT, COL_LANE_MARK, COL_GRASS,
 )
-from .image_art import png_to_block_art, art_to_curses
+from .cars import make_car_surface
 
 
-def setup_colors() -> None:
-    curses.start_color()
-    curses.use_default_colors()
-    curses.init_pair(CP_RED,     curses.COLOR_RED,     -1)
-    curses.init_pair(CP_GREEN,   curses.COLOR_GREEN,   -1)
-    curses.init_pair(CP_YELLOW,  curses.COLOR_YELLOW,  -1)
-    curses.init_pair(4,          curses.COLOR_BLUE,    -1)
-    curses.init_pair(CP_CYAN,    curses.COLOR_CYAN,    -1)
-    curses.init_pair(6,          curses.COLOR_MAGENTA, -1)
-    curses.init_pair(CP_WHITE,   curses.COLOR_WHITE,   -1)
+def _draw_bg(screen: pygame.Surface, tick: int):
+    """Animated background for menus."""
+    screen.fill((15, 15, 25))
+
+    # Scrolling road in background
+    road_x = WIDTH // 2 - 100
+    pygame.draw.rect(screen, COL_ASPHALT, (road_x, 0, 200, HEIGHT))
+    offset = tick % 70
+    for y in range(-70, HEIGHT + 70, 70):
+        yy = y + offset
+        pygame.draw.rect(screen, COL_LANE_MARK,
+                         (road_x + 98, yy, 4, 40))
+
+    # Grass strips
+    pygame.draw.rect(screen, COL_GRASS, (0, 0, road_x, HEIGHT))
+    pygame.draw.rect(screen, COL_GRASS, (road_x + 200, 0, WIDTH - road_x - 200, HEIGHT))
+
+    # Dark overlay for readability
+    overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+    overlay.fill((15, 15, 25, 180))
+    screen.blit(overlay, (0, 0))
 
 
-def size_ok(stdscr) -> bool:
-    h, w = stdscr.getmaxyx()
-    if w < MIN_COLS or h < MIN_ROWS:
-        stdscr.erase()
-        try:
-            stdscr.addstr(0, 0,
-                          f"Terminal too small! Need {MIN_COLS}x{MIN_ROWS}, got {w}x{h}.",
-                          curses.color_pair(CP_RED) | curses.A_BOLD)
-            stdscr.addstr(1, 0, "Please resize and restart.",
-                          curses.color_pair(CP_WHITE))
-        except curses.error:
-            pass
-        stdscr.refresh()
-        time.sleep(3)
-        return False
-    return True
+def splash(screen: pygame.Surface) -> bool:
+    """Title screen. Returns True to continue, False to quit."""
+    clock = pygame.time.Clock()
 
+    font_title  = pygame.font.SysFont("Arial", 60, bold=True)
+    font_sub    = pygame.font.SysFont("Arial", 22)
+    font_small  = pygame.font.SysFont("Arial", 17)
+    font_key    = pygame.font.SysFont("Arial", 18, bold=True)
 
-def splash(stdscr) -> bool:
-    """Show title screen. Returns True to start, False to quit."""
-    h, w = stdscr.getmaxyx()
-    stdscr.erase()
-
-    banner = [
-        r"  ____    _    ____     ____   ___  ____   ____ ___ ",
-        r" / ___|  / \  |  _ \   |  _ \ / _ \|  _ \ / ___| __|",
-        r"| |     / _ \ | |_) |  | | | | | | | | | | |  |  _| ",
-        r"| |___ / ___ \|  _ <   | |_| | |_| | |_| | |__| |___",
-        r" \____/_/   \_\_| \_\  |____/ \___/|____/ \____|____|",
-    ]
-
-    sy = max(1, h // 2 - 9)
-    for i, line in enumerate(banner):
-        x = max(0, w // 2 - len(line) // 2)
-        try:
-            stdscr.addstr(sy + i, x, line,
-                          curses.color_pair(CP_YELLOW) | curses.A_BOLD)
-        except curses.error:
-            pass
-
-    info = [
-        ("Dodge cars coming at you from the opposite direction!", CP_WHITE, 0),
-        ("",                                                       CP_WHITE, 0),
-        ("  Controls",                                             CP_CYAN,  curses.A_BOLD | curses.A_UNDERLINE),
-        ("  LEFT / A    Move to the left lane",                    CP_WHITE, 0),
-        ("  RIGHT / D   Move to the right lane",                   CP_WHITE, 0),
-        ("  Q           Quit",                                     CP_WHITE, 0),
-        ("",                                                       CP_WHITE, 0),
-        ("  Score 1 point for every car you dodge.",               CP_GREEN, 0),
-        ("  Speed increases every 5 cars dodged.",                 CP_GREEN, 0),
-        ("  Don't crash!",                                         CP_RED,   curses.A_BOLD),
-        ("",                                                       CP_WHITE, 0),
-        ("  Press SPACE or ENTER to start ...",                    CP_YELLOW, curses.A_BOLD),
-    ]
-
-    start = sy + len(banner) + 2
-    lx    = max(0, w // 2 - 27)
-    for i, (text, color, extra) in enumerate(info):
-        try:
-            stdscr.addstr(start + i, lx, text,
-                          curses.color_pair(color) | extra)
-        except curses.error:
-            pass
-
-    stdscr.refresh()
-    stdscr.nodelay(False)
-
+    tick = 0
     while True:
-        k = stdscr.getch()
-        if k in (ord(" "), 10, 13, curses.KEY_ENTER):
-            return True
-        if k in (ord("q"), ord("Q")):
-            return False
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return False
+            if event.type == pygame.KEYDOWN:
+                if event.key in (pygame.K_RETURN, pygame.K_SPACE):
+                    return True
+                if event.key == pygame.K_q:
+                    return False
 
+        _draw_bg(screen, tick)
 
-def customization_screen(stdscr) -> tuple[int, str]:
-    """
-    Two-section customization screen:
-      LEFT  — Car skin picker  (← / → to cycle)
-      RIGHT — Sound theme picker (← / → to cycle)
-    TAB or UP/DOWN switches between sections.
-    ENTER/SPACE confirms. Q goes back (returns defaults).
+        # Title with glow
+        title = font_title.render("CAR DODGE", True, COL_HUD_GOLD)
+        title_rect = title.get_rect(center=(WIDTH // 2, 120))
 
-    Returns (skin_index: int, sound_theme: str).
-    """
-    h, w = stdscr.getmaxyx()
-    skins  = CAR_SKINS
-    n_skins = len(skins)
-    n_sounds = len(SOUND_THEMES)
+        # Pulsing glow
+        pulse = abs(math.sin(tick * 0.03)) * 30 + 20
+        glow = pygame.Surface((title.get_width() + 60, title.get_height() + 30),
+                              pygame.SRCALPHA)
+        glow.fill((255, 215, 0, int(pulse)))
+        screen.blit(glow, glow.get_rect(center=title_rect.center))
+        screen.blit(title, title_rect)
 
-    skin_sel  = 0   # chosen skin index
-    sound_sel = 0   # chosen sound theme index
-    section   = 0   # 0 = car section active, 1 = sound section active
+        # Subtitle
+        sub = font_sub.render("Dodge oncoming traffic!", True, COL_HUD_DIM)
+        screen.blit(sub, sub.get_rect(center=(WIDTH // 2, 180)))
 
-    # Pre-load all skin block art
-    raw_arts: list[list[list[tuple[str, int, int]]] | None] = []
-    for _name, path, _color in skins:
-        try:
-            raw_arts.append(png_to_block_art(path, CAR_W, CAR_H))
-        except Exception:
-            raw_arts.append(None)
+        # Instructions box
+        box_w, box_h = 420, 260
+        bx = WIDTH // 2 - box_w // 2
+        by = 220
 
-    # Convert to curses attrs
-    curses_arts: list[list[list[tuple[str, int]]] | None] = []
-    for raw in raw_arts:
-        if raw is not None:
-            try:
-                curses_arts.append(art_to_curses(raw))
-            except Exception:
-                curses_arts.append(None)
-        else:
-            curses_arts.append(None)
+        panel = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
+        pygame.draw.rect(panel, (10, 10, 15, 180), (0, 0, box_w, box_h),
+                         border_radius=12)
+        pygame.draw.rect(panel, COL_HUD_BORDER, (0, 0, box_w, box_h),
+                         width=2, border_radius=12)
+        screen.blit(panel, (bx, by))
 
-    stdscr.nodelay(False)
-
-    while True:
-        stdscr.erase()
-
-        # ── title ────────────────────────────────────────────────
-        title     = "=======  CUSTOMIZE  ======="
-        ty        = max(1, h // 2 - 11)
-        tx        = max(0, w // 2 - len(title) // 2)
-        try:
-            stdscr.addstr(ty, tx, "+" + "=" * (len(title) - 2) + "+",
-                          curses.color_pair(CP_YELLOW) | curses.A_BOLD)
-            stdscr.addstr(ty + 1, tx, "|" + title + "|",
-                          curses.color_pair(CP_YELLOW) | curses.A_BOLD)
-            stdscr.addstr(ty + 2, tx, "+" + "=" * (len(title) - 2) + "+",
-                          curses.color_pair(CP_YELLOW) | curses.A_BOLD)
-        except curses.error:
-            pass
-
-        # ── layout: two columns side by side ─────────────────────
-        # Left column: car picker.  Right column: sound picker.
-        # Total width: CAR_W + gap + sound_col_w
-        gap           = 8
-        sound_col_w   = 20
-        total_w       = CAR_W + gap + sound_col_w
-        left_x        = max(0, w // 2 - total_w // 2)
-        right_x       = left_x + CAR_W + gap
-        content_top   = ty + 5      # first row of section headers
-
-        # ── CAR section header ───────────────────────────────────
-        car_active = (section == 0)
-        car_hdr_attr = (curses.color_pair(CP_CYAN) | curses.A_BOLD | curses.A_UNDERLINE
-                        if car_active
-                        else curses.color_pair(CP_WHITE) | curses.A_DIM)
-        try:
-            stdscr.addstr(content_top, left_x, "  YOUR CAR  ", car_hdr_attr)
-        except curses.error:
-            pass
-
-        # ── car selector row: ← NAME → ──────────────────────────
-        skin_name = skins[skin_sel][0]
-        arrow_attr = (curses.color_pair(CP_CYAN) | curses.A_BOLD
-                      if car_active
-                      else curses.color_pair(CP_WHITE) | curses.A_DIM)
-        name_attr  = (curses.color_pair(CP_YELLOW) | curses.A_BOLD
-                      if car_active
-                      else curses.color_pair(CP_WHITE) | curses.A_DIM)
-        car_label  = f"\u2190 {skin_name:^6s} \u2192"   # ← NAME →
-        try:
-            stdscr.addstr(content_top + 1, left_x, "← ", arrow_attr)
-            stdscr.addstr(content_top + 1, left_x + 2, f"{skin_name:^6s}", name_attr)
-            stdscr.addstr(content_top + 1, left_x + 2 + 6, " →", arrow_attr)
-        except curses.error:
-            pass
-
-        # ── car art ──────────────────────────────────────────────
-        car_art_top = content_top + 3
-        art_curses  = curses_arts[skin_sel]
-        if art_curses is not None:
-            for row_i, row in enumerate(art_curses):
-                for col_i, (ch, attr) in enumerate(row):
-                    try:
-                        stdscr.addch(car_art_top + row_i, left_x + col_i, ch, attr)
-                    except curses.error:
-                        pass
-        else:
-            fb_attr = (curses.color_pair(CP_CYAN) | curses.A_BOLD
-                       if car_active
-                       else curses.color_pair(CP_WHITE) | curses.A_DIM)
-            for row_i, line in enumerate(PLAYER_ART):
-                try:
-                    stdscr.addstr(car_art_top + row_i, left_x, line, fb_attr)
-                except curses.error:
-                    pass
-
-        # selection box around car art
-        box_attr = (curses.color_pair(CP_CYAN) | curses.A_BOLD
-                    if car_active
-                    else curses.color_pair(CP_WHITE) | curses.A_DIM)
-        for row_i in range(CAR_H):
-            try:
-                stdscr.addstr(car_art_top + row_i, left_x - 1, "[", box_attr)
-                stdscr.addstr(car_art_top + row_i, left_x + CAR_W, "]", box_attr)
-            except curses.error:
-                pass
-
-        # ── SOUND section header ─────────────────────────────────
-        snd_active   = (section == 1)
-        snd_hdr_attr = (curses.color_pair(CP_CYAN) | curses.A_BOLD | curses.A_UNDERLINE
-                        if snd_active
-                        else curses.color_pair(CP_WHITE) | curses.A_DIM)
-        try:
-            stdscr.addstr(content_top, right_x, "    SOUND   ", snd_hdr_attr)
-        except curses.error:
-            pass
-
-        # ── sound selector row: ← THEME → ───────────────────────
-        snd_disp_name, snd_key, snd_desc = SOUND_THEMES[sound_sel]
-        snd_arrow_attr = (curses.color_pair(CP_CYAN) | curses.A_BOLD
-                          if snd_active
-                          else curses.color_pair(CP_WHITE) | curses.A_DIM)
-        snd_name_attr  = (curses.color_pair(CP_YELLOW) | curses.A_BOLD
-                          if snd_active
-                          else curses.color_pair(CP_WHITE) | curses.A_DIM)
-        snd_desc_attr  = (curses.color_pair(CP_GREEN) | curses.A_BOLD
-                          if snd_active
-                          else curses.color_pair(CP_WHITE) | curses.A_DIM)
-        try:
-            stdscr.addstr(content_top + 1, right_x, "← ", snd_arrow_attr)
-            stdscr.addstr(content_top + 1, right_x + 2, f"{snd_disp_name:^8s}", snd_name_attr)
-            stdscr.addstr(content_top + 1, right_x + 2 + 8, " →", snd_arrow_attr)
-        except curses.error:
-            pass
-
-        # description line
-        try:
-            stdscr.addstr(content_top + 3, right_x, snd_desc[:sound_col_w], snd_desc_attr)
-        except curses.error:
-            pass
-
-        # sound section box (vertical lines matching car art height)
-        snd_box_attr = (curses.color_pair(CP_CYAN) | curses.A_BOLD
-                        if snd_active
-                        else curses.color_pair(CP_WHITE) | curses.A_DIM)
-        for row_i in range(CAR_H):
-            try:
-                stdscr.addstr(car_art_top + row_i, right_x - 1, "[", snd_box_attr)
-                stdscr.addstr(car_art_top + row_i, right_x + sound_col_w, "]", snd_box_attr)
-            except curses.error:
-                pass
-
-        # ── bottom hints ─────────────────────────────────────────
-        hint_y = car_art_top + CAR_H + 2
-        hints = [
-            ("← / →  cycle within section", CP_WHITE, 0),
-            ("TAB     switch section",        CP_WHITE, 0),
-            ("ENTER   race!     Q  back",     CP_YELLOW, curses.A_BOLD),
+        # Control info
+        info_lines = [
+            ("Controls", COL_HUD_ACCENT, True),
+            ("", None, False),
+            ("LEFT / A     Move left", COL_HUD_TEXT, False),
+            ("RIGHT / D    Move right", COL_HUD_TEXT, False),
+            ("Q            Quit", COL_HUD_TEXT, False),
+            ("", None, False),
+            ("Rules", COL_HUD_ACCENT, True),
+            ("", None, False),
+            ("+1 point for every car you dodge", COL_HUD_GOOD, False),
+            ("Speed increases every 5 cars", COL_HUD_WARN, False),
+            ("Don't crash!", COL_HUD_WARN, False),
         ]
-        for hi, (htxt, hcol, hextra) in enumerate(hints):
-            hx = max(0, w // 2 - len(htxt) // 2)
-            try:
-                stdscr.addstr(hint_y + hi, hx, htxt,
-                              curses.color_pair(hcol) | hextra)
-            except curses.error:
-                pass
 
-        stdscr.refresh()
+        ly = by + 15
+        for text, color, is_header in info_lines:
+            if not text:
+                ly += 8
+                continue
+            font = font_key if is_header else font_small
+            t = font.render(text, True, color)
+            screen.blit(t, (bx + 25, ly))
+            ly += 24
 
-        # ── input ────────────────────────────────────────────────
-        k = stdscr.getch()
-        if k in (9, curses.KEY_UP, curses.KEY_DOWN,
-                 ord("\t")):          # TAB / UP / DOWN → switch section
-            section = 1 - section
-        elif k in (curses.KEY_LEFT, ord("a"), ord("A")):
-            if section == 0:
-                skin_sel = (skin_sel - 1) % n_skins
-            else:
-                sound_sel = (sound_sel - 1) % n_sounds
-        elif k in (curses.KEY_RIGHT, ord("d"), ord("D")):
-            if section == 0:
-                skin_sel = (skin_sel + 1) % n_skins
-            else:
-                sound_sel = (sound_sel + 1) % n_sounds
-        elif k in (ord(" "), 10, 13, curses.KEY_ENTER):
-            return (skin_sel, SOUND_THEMES[sound_sel][1])
-        elif k in (ord("q"), ord("Q")):
-            return (0, "engine")   # defaults
+        # Start prompt (pulsing)
+        if (tick // 30) % 2 == 0:
+            start = font_key.render("Press SPACE or ENTER to start...",
+                                    True, COL_HUD_GOLD)
+            screen.blit(start, start.get_rect(center=(WIDTH // 2, HEIGHT - 60)))
+
+        pygame.display.flip()
+        clock.tick(FPS)
+        tick += 1
+
+
+def customization_screen(screen: pygame.Surface) -> tuple[int, str]:
+    """Car and sound theme picker. Returns (skin_index, sound_theme)."""
+    clock = pygame.time.Clock()
+
+    font_title = pygame.font.SysFont("Arial", 36, bold=True)
+    font_med   = pygame.font.SysFont("Arial", 20, bold=True)
+    font_small = pygame.font.SysFont("Arial", 16)
+    font_key   = pygame.font.SysFont("Arial", 14, bold=True)
+
+    skin_sel  = 0
+    sound_sel = 0
+    section   = 0  # 0 = car, 1 = sound
+    tick      = 0
+
+    # Pre-build car preview surfaces
+    car_previews = []
+    for _name, color in COL_PLAYER_COLORS:
+        car_previews.append(make_car_surface(color, is_player=True))
+
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return (0, "engine")
+            if event.type == pygame.KEYDOWN:
+                if event.key in (pygame.K_TAB, pygame.K_UP, pygame.K_DOWN):
+                    section = 1 - section
+                elif event.key in (pygame.K_LEFT, pygame.K_a):
+                    if section == 0:
+                        skin_sel = (skin_sel - 1) % len(COL_PLAYER_COLORS)
+                    else:
+                        sound_sel = (sound_sel - 1) % len(SOUND_THEMES)
+                elif event.key in (pygame.K_RIGHT, pygame.K_d):
+                    if section == 0:
+                        skin_sel = (skin_sel + 1) % len(COL_PLAYER_COLORS)
+                    else:
+                        sound_sel = (sound_sel + 1) % len(SOUND_THEMES)
+                elif event.key in (pygame.K_RETURN, pygame.K_SPACE):
+                    return (skin_sel, SOUND_THEMES[sound_sel][1])
+                elif event.key == pygame.K_q:
+                    return (0, "engine")
+
+        _draw_bg(screen, tick)
+
+        # Title
+        title = font_title.render("CUSTOMIZE", True, COL_HUD_GOLD)
+        screen.blit(title, title.get_rect(center=(WIDTH // 2, 50)))
+
+        # ── Car section (left) ──────────────────────────────────
+        car_active = (section == 0)
+        car_border = COL_HUD_ACCENT if car_active else COL_HUD_DIM
+
+        car_panel = pygame.Rect(WIDTH // 2 - 340, 100, 300, 350)
+        panel_s = pygame.Surface((car_panel.w, car_panel.h), pygame.SRCALPHA)
+        pygame.draw.rect(panel_s, (10, 10, 15, 180),
+                         (0, 0, car_panel.w, car_panel.h), border_radius=12)
+        pygame.draw.rect(panel_s, car_border,
+                         (0, 0, car_panel.w, car_panel.h), width=2, border_radius=12)
+        screen.blit(panel_s, car_panel.topleft)
+
+        # Header
+        hdr = font_med.render("YOUR CAR", True, car_border)
+        screen.blit(hdr, hdr.get_rect(center=(car_panel.centerx, car_panel.y + 25)))
+
+        # Car name with arrows
+        name = COL_PLAYER_COLORS[skin_sel][0]
+        arrow_color = COL_HUD_ACCENT if car_active else COL_HUD_DIM
+        left_arr  = font_med.render("\u25C0", True, arrow_color)
+        right_arr = font_med.render("\u25B6", True, arrow_color)
+        name_text = font_med.render(name, True, COL_HUD_GOLD)
+
+        cy = car_panel.y + 60
+        screen.blit(left_arr, (car_panel.x + 30, cy))
+        screen.blit(name_text, name_text.get_rect(center=(car_panel.centerx, cy + 10)))
+        screen.blit(right_arr, (car_panel.right - 50, cy))
+
+        # Car preview (large, centered)
+        preview = car_previews[skin_sel]
+        big_preview = pygame.transform.scale(preview, (120, 220))
+        preview_rect = big_preview.get_rect(
+            center=(car_panel.centerx, car_panel.y + 220))
+        screen.blit(big_preview, preview_rect)
+
+        # ── Sound section (right) ───────────────────────────────
+        snd_active = (section == 1)
+        snd_border = COL_HUD_ACCENT if snd_active else COL_HUD_DIM
+
+        snd_panel = pygame.Rect(WIDTH // 2 + 40, 100, 300, 350)
+        panel_s2 = pygame.Surface((snd_panel.w, snd_panel.h), pygame.SRCALPHA)
+        pygame.draw.rect(panel_s2, (10, 10, 15, 180),
+                         (0, 0, snd_panel.w, snd_panel.h), border_radius=12)
+        pygame.draw.rect(panel_s2, snd_border,
+                         (0, 0, snd_panel.w, snd_panel.h), width=2, border_radius=12)
+        screen.blit(panel_s2, snd_panel.topleft)
+
+        # Header
+        shdr = font_med.render("SOUND THEME", True, snd_border)
+        screen.blit(shdr, shdr.get_rect(center=(snd_panel.centerx, snd_panel.y + 25)))
+
+        # Theme name with arrows
+        snd_name = SOUND_THEMES[sound_sel][0]
+        snd_desc = SOUND_THEMES[sound_sel][2]
+        sarr_color = COL_HUD_ACCENT if snd_active else COL_HUD_DIM
+
+        sy = snd_panel.y + 60
+        la = font_med.render("\u25C0", True, sarr_color)
+        ra = font_med.render("\u25B6", True, sarr_color)
+        sn = font_med.render(snd_name, True, COL_HUD_GOLD)
+
+        screen.blit(la, (snd_panel.x + 30, sy))
+        screen.blit(sn, sn.get_rect(center=(snd_panel.centerx, sy + 10)))
+        screen.blit(ra, (snd_panel.right - 50, sy))
+
+        # Description
+        desc_text = font_small.render(snd_desc, True, COL_HUD_DIM)
+        screen.blit(desc_text, desc_text.get_rect(
+            center=(snd_panel.centerx, sy + 45)))
+
+        # Sound visualization (decorative bars)
+        bar_y = snd_panel.y + 150
+        bar_count = 12
+        bar_spacing = 18
+        bar_start_x = snd_panel.centerx - (bar_count * bar_spacing) // 2
+
+        for i in range(bar_count):
+            bh = int(abs(math.sin((tick + i * 8) * 0.08)) * 80 + 10)
+            bx_pos = bar_start_x + i * bar_spacing
+            bar_color = COL_HUD_ACCENT if snd_active else COL_HUD_DIM
+            pygame.draw.rect(screen, bar_color,
+                             (bx_pos, bar_y + 100 - bh, 10, bh),
+                             border_radius=3)
+
+        # ── Bottom hints ────────────────────────────────────────
+        hints = [
+            "[</>] Cycle   [TAB] Switch   [ENTER] Race!   [Q] Back"
+        ]
+        for i, h in enumerate(hints):
+            t = font_key.render(h, True, COL_HUD_DIM)
+            screen.blit(t, t.get_rect(center=(WIDTH // 2, HEIGHT - 50 + i * 20)))
+
+        pygame.display.flip()
+        clock.tick(FPS)
+        tick += 1

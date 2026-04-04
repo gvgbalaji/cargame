@@ -1,1 +1,1 @@
-# Car Dodge — terminal car-dodging game
+# Car Dodge — Pygame car-dodging game

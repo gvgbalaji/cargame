@@ -1,90 +1,95 @@
-# ── Road layout ────────────────────────────────────────────────
-ROAD_LEFT  = 6        # x-column of left road edge
-ROAD_WIDTH = 36       # total drivable width
-NUM_LANES  = 3
-LANE_WIDTH = ROAD_WIDTH // NUM_LANES   # 12 per lane
+# ── Window ────────────────────────────────────────────────────
+WIDTH  = 900
+HEIGHT = 650
+FPS    = 60
+TITLE  = "Car Dodge"
 
-# ── Car dimensions ─────────────────────────────────────────────
-CAR_W = 7
-CAR_H = 3
+# ── Road layout (pixel coords) ───────────────────────────────
+NUM_LANES   = 3
+ROAD_LEFT   = 200
+ROAD_WIDTH  = 360
+ROAD_RIGHT  = ROAD_LEFT + ROAD_WIDTH
+LANE_WIDTH  = ROAD_WIDTH // NUM_LANES
+ROAD_CENTER = ROAD_LEFT + ROAD_WIDTH // 2
 
-# ── Terminal size floor ────────────────────────────────────────
-MIN_COLS = ROAD_LEFT + ROAD_WIDTH + 12
-MIN_ROWS = 24
+# ── Car dimensions (pixels) ──────────────────────────────────
+CAR_W = 60
+CAR_H = 110
 
-# ── Right-side scenery layout (relative to road_right = 42) ────
-GRASS_EXTRA_W = 10
-TREE_COL_1    = 14    # offset from road_right
-TREE_COL_2    = 19    # offset from road_right (staggered)
-SIDEBAR_X_OFF = 24    # offset from road_right where panel starts
-SIDEBAR_IW    = 16    # inner width of panel
-SIDEBAR_H     = 16    # rows tall
+# ── Colors ────────────────────────────────────────────────────
+# Road / environment
+COL_ASPHALT     = (45, 45, 50)
+COL_ASPHALT_L   = (55, 55, 60)
+COL_SHOULDER    = (70, 70, 75)
+COL_LANE_MARK   = (220, 200, 60)
+COL_EDGE_MARK   = (255, 255, 255)
+COL_GRASS       = (34, 120, 34)
+COL_GRASS_DARK  = (28, 95, 28)
+COL_GRASS_LIGHT = (45, 145, 45)
+COL_SKY_TOP     = (15, 15, 35)
+COL_SKY_BOT     = (40, 40, 80)
 
-# ── Color pair IDs ─────────────────────────────────────────────
-CP_RED     = 1
-CP_GREEN   = 2
-CP_YELLOW  = 3
-CP_BLUE    = 4
-CP_CYAN    = 5
-CP_MAGENTA = 6
-CP_WHITE   = 7
+# HUD
+COL_HUD_BG      = (10, 10, 15, 180)
+COL_HUD_BORDER  = (80, 200, 255)
+COL_HUD_TEXT    = (255, 255, 255)
+COL_HUD_ACCENT  = (0, 200, 255)
+COL_HUD_WARN    = (255, 80, 60)
+COL_HUD_GOOD    = (80, 255, 120)
+COL_HUD_GOLD    = (255, 215, 0)
+COL_HUD_DIM     = (140, 140, 160)
 
-# ── Car artwork (7 wide × 3 tall) ──────────────────────────────
-PLAYER_ART = [
-    "╭─░░░─╮",
-    "│ ─▴─ │",
-    "╰─░░░─╯",
+# Cars
+COL_PLAYER_COLORS = [
+    ("BLUE",    (30, 120, 255)),
+    ("RED",     (220, 40, 40)),
+    ("GREEN",   (40, 200, 80)),
+    ("ORANGE",  (255, 140, 20)),
+    ("PURPLE",  (160, 60, 220)),
+    ("WHITE",   (230, 230, 240)),
 ]
 
-ENEMY_ARTS = [
-    ["╔═════╗", "║ ● ● ║", "╚══╦══╝"],   # Sedan
-    ["╔═╦═╦═╗", "╠═════╣", "╚═════╝"],   # SUV
-    ["╔═════╗", "║█   █║", "╚══╦══╝"],   # Sports
-    ["╔═════╗", "║▓▓▓▓▓║", "╚═════╝"],   # Van
-    ["╔═════╗", "╠ ● ● ╣", "╚═╦═╦═╝"],   # Racer
+COL_ENEMY_COLORS = [
+    (220, 40, 40),
+    (40, 200, 80),
+    (255, 140, 20),
+    (160, 60, 220),
+    (230, 230, 240),
+    (255, 200, 60),
 ]
 
-ENEMY_COLORS = [CP_RED, CP_MAGENTA, CP_CYAN, CP_BLUE]
-
-# ── Player colour picker options ────────────────────────────────
-PLAYER_COLOR_OPTIONS: list[tuple[str, int]] = [
-    ("YELLOW",  CP_YELLOW),
-    ("CYAN",    CP_CYAN),
-    ("GREEN",   CP_GREEN),
-    ("MAGENTA", CP_MAGENTA),
-    ("WHITE",   CP_WHITE),
-    ("RED",     CP_RED),
+# ── Sound themes ──────────────────────────────────────────────
+SOUND_THEMES = [
+    ("ENGINE",  "engine",  "Realistic engine buzz"),
+    ("RETRO",   "retro",   "Arcade beeps & booms"),
+    ("MINIMAL", "minimal", "Whoosh & screech"),
+    ("SILENT",  "silent",  "No sound"),
 ]
 
-# ── Car skin options (name, PNG path, curses color for in-game) ──
-# Images shown in customization screen only; game uses Unicode art + color.
-CAR_SKINS: list[tuple[str, str, int]] = [
-    ("BLUE",  "/home/gv/Downloads/icons8-car-48.png", CP_CYAN),
-    ("RED",   "/home/gv/Downloads/icons8-car-64.png", CP_RED),
-]
-
-# ── Sound theme options ─────────────────────────────────────────
-SOUND_THEMES: list[tuple[str, str, str]] = [
-    ("ENGINE", "engine", "Realistic engine buzz"),
-    ("RETRO",  "retro",  "Arcade beeps & booms"),
-    ("MINIMAL","minimal","Whoosh & screech"),
-    ("SILENT", "silent", "No sound"),
-]
-
+# ── Level tips ────────────────────────────────────────────────
 LEVEL_TIPS = [
-    "Stay focused! ",
-    "Eyes on road! ",
-    "Keep dodging! ",
-    "Don't blink!  ",
-    "Speed rising! ",
-    "Heart pounding",
-    "DANGER AHEAD! ",
-    "Nerves of steel",
-    "Nearly insane!",
-    "MAX SPEED!!!  ",
+    "Trust the RNG",
+    "It ends badly",
+    "Buckle up, fam",
+    "Mom's watching",
+    "The road wins",
+    "YOLO activated",
+    "No brakes club",
+    "Just a sim bro",
+    "RIP, my palms",
+    "Touch grass? No",
+    "Goodbye, world",
+    "404 skill lost",
+    "Speed = fate",
+    "Why am I here?",
 ]
 
 
-def lane_x(lane: int) -> int:
-    """Left-edge x position of a car centred in the given lane."""
-    return ROAD_LEFT + lane * LANE_WIDTH + (LANE_WIDTH - CAR_W) // 2
+def lane_center_x(lane: int) -> float:
+    """Return the center x-pixel of the given lane."""
+    return ROAD_LEFT + lane * LANE_WIDTH + LANE_WIDTH / 2
+
+
+def lane_car_x(lane: int) -> float:
+    """Return the left x-pixel to center a car in the given lane."""
+    return lane_center_x(lane) - CAR_W / 2

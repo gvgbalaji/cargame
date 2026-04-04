@@ -1,243 +1,160 @@
-"""All curses drawing lives here. No game logic."""
+"""All Pygame drawing lives here. No game logic."""
 
-import curses
+import math
 import random
-import time
+
+import pygame
 
 from .constants import (
-    CAR_H, CAR_W, CP_CYAN, CP_GREEN, CP_MAGENTA, CP_RED, CP_WHITE, CP_YELLOW,
-    GRASS_EXTRA_W, LEVEL_TIPS, NUM_LANES, ROAD_LEFT, ROAD_WIDTH,
-    SIDEBAR_H, SIDEBAR_IW, SIDEBAR_X_OFF, TREE_COL_1, TREE_COL_2,
-    LANE_WIDTH,
+    WIDTH, HEIGHT, NUM_LANES, LANE_WIDTH,
+    ROAD_LEFT, ROAD_RIGHT, ROAD_WIDTH, ROAD_CENTER,
+    COL_ASPHALT, COL_ASPHALT_L, COL_SHOULDER, COL_LANE_MARK,
+    COL_EDGE_MARK, COL_GRASS, COL_GRASS_DARK, COL_GRASS_LIGHT,
+    COL_SKY_TOP, COL_SKY_BOT,
 )
-
-_CONFETTI_CHARS  = list("*+·✦★°╋●◆▲")
-_CONFETTI_COLORS = [CP_RED, CP_YELLOW, CP_CYAN, CP_MAGENTA, CP_GREEN, CP_WHITE]
 
 
 class Renderer:
+    """Handles all visual drawing to the Pygame display surface."""
 
-    def __init__(self, scr):
-        self.scr = scr
-        self.h, self.w = scr.getmaxyx()
+    def __init__(self, screen: pygame.Surface):
+        self.screen = screen
+        self.w = WIDTH
+        self.h = HEIGHT
+        self._build_background()
+        self._build_tree_surface()
 
-    # ── safe draw helpers ────────────────────────────────────────
+    # ── pre-rendered assets ─────────────────────────────────────
 
-    def _put(self, y: int, x: int, text: str, attr: int = 0) -> None:
-        if 0 <= y < self.h and 0 <= x < self.w:
-            try:
-                self.scr.addstr(y, x, text[: self.w - x], attr)
-            except curses.error:
-                pass
+    def _build_background(self):
+        """Pre-render the static background (sky + grass)."""
+        self.bg = pygame.Surface((self.w, self.h))
 
-    def _ch(self, y: int, x: int, ch: str, attr: int = 0) -> None:
-        if 0 <= y < self.h - 1 and 0 <= x < self.w - 1:
-            try:
-                self.scr.addch(y, x, ch, attr)
-            except curses.error:
-                pass
+        # Sky gradient
+        for y in range(self.h):
+            t = y / self.h
+            r = int(COL_SKY_TOP[0] + (COL_SKY_BOT[0] - COL_SKY_TOP[0]) * t)
+            g = int(COL_SKY_TOP[1] + (COL_SKY_BOT[1] - COL_SKY_TOP[1]) * t)
+            b = int(COL_SKY_TOP[2] + (COL_SKY_BOT[2] - COL_SKY_TOP[2]) * t)
+            pygame.draw.line(self.bg, (r, g, b), (0, y), (self.w, y))
 
-    # ── road ─────────────────────────────────────────────────────
+        # Grass areas
+        grass_left = pygame.Rect(0, 0, ROAD_LEFT - 8, self.h)
+        grass_right = pygame.Rect(ROAD_RIGHT + 8, 0, self.w - ROAD_RIGHT - 8, self.h)
+        pygame.draw.rect(self.bg, COL_GRASS, grass_left)
+        pygame.draw.rect(self.bg, COL_GRASS, grass_right)
 
-    def road(self, scroll: float) -> None:
-        road_right = ROAD_LEFT + ROAD_WIDTH
-        offset     = int(scroll) % 4
+        # Grass stripes for texture
+        for y in range(0, self.h, 12):
+            c = COL_GRASS_DARK if (y // 12) % 2 == 0 else COL_GRASS_LIGHT
+            pygame.draw.line(self.bg, c, (0, y), (ROAD_LEFT - 8, y), 2)
+            pygame.draw.line(self.bg, c, (ROAD_RIGHT + 8, y), (self.w, y), 2)
 
-        for y in range(1, self.h - 1):
-            self._put(y, 0,              "░░░░  ",          curses.color_pair(CP_GREEN))
-            self._put(y, road_right + 2, "░" * GRASS_EXTRA_W, curses.color_pair(CP_GREEN))
-            self._put(y, ROAD_LEFT - 2,  "██",              curses.color_pair(CP_YELLOW) | curses.A_BOLD)
-            self._put(y, road_right,     "██",              curses.color_pair(CP_YELLOW) | curses.A_BOLD)
-            for lane in range(1, NUM_LANES):
-                lx = ROAD_LEFT + lane * LANE_WIDTH
-                if (y + offset) % 4 < 2:
-                    self._ch(y, lx, "|", curses.color_pair(CP_YELLOW) | curses.A_DIM)
+        # Road surface
+        road_rect = pygame.Rect(ROAD_LEFT - 8, 0, ROAD_WIDTH + 16, self.h)
+        pygame.draw.rect(self.bg, COL_ASPHALT, road_rect)
 
-    # ── scenery ──────────────────────────────────────────────────
+        # Road shoulders
+        pygame.draw.rect(self.bg, COL_SHOULDER, (ROAD_LEFT - 8, 0, 8, self.h))
+        pygame.draw.rect(self.bg, COL_SHOULDER, (ROAD_RIGHT, 0, 8, self.h))
 
-    def scenery(self, scroll: float) -> None:
-        road_right = ROAD_LEFT + ROAD_WIDTH
-        tx1   = road_right + TREE_COL_1
-        tx2   = road_right + TREE_COL_2
-        CYCLE = 9
-        off   = int(scroll) % CYCLE
+        # Edge lines (solid white)
+        pygame.draw.rect(self.bg, COL_EDGE_MARK, (ROAD_LEFT - 2, 0, 3, self.h))
+        pygame.draw.rect(self.bg, COL_EDGE_MARK, (ROAD_RIGHT - 1, 0, 3, self.h))
 
-        for y in range(1, self.h - 1):
-            self._draw_tree_row(y, tx1, (y + off) % CYCLE)
-            self._draw_tree_row(y, tx2, (y + off + CYCLE // 2) % CYCLE)
+    def _build_tree_surface(self):
+        """Pre-render a tree sprite."""
+        self.tree_surf = pygame.Surface((40, 60), pygame.SRCALPHA)
+        # Trunk
+        pygame.draw.rect(self.tree_surf, (100, 70, 40), (15, 35, 10, 25))
+        # Canopy layers
+        pygame.draw.circle(self.tree_surf, (20, 100, 20), (20, 28), 18)
+        pygame.draw.circle(self.tree_surf, (30, 130, 30), (20, 22), 15)
+        pygame.draw.circle(self.tree_surf, (45, 155, 45), (20, 18), 10)
 
-    def _draw_tree_row(self, y: int, x: int, ty: int) -> None:
-        if ty == 0:
-            self._put(y, x, " ▲ ", curses.color_pair(CP_GREEN) | curses.A_BOLD)
-        elif ty == 1:
-            self._put(y, x, "▲▲▲", curses.color_pair(CP_GREEN))
-        elif ty == 2:
-            self._put(y, x, " █ ", curses.color_pair(CP_YELLOW) | curses.A_DIM)
+    # ── per-frame drawing ───────────────────────────────────────
 
-    # ── sidebar ──────────────────────────────────────────────────
+    def draw_background(self):
+        self.screen.blit(self.bg, (0, 0))
 
-    def sidebar(self, score: int, best: int, level: int, speed: float) -> None:
-        road_right = ROAD_LEFT + ROAD_WIDTH
-        sx = road_right + SIDEBAR_X_OFF
-        if sx + SIDEBAR_IW + 2 > self.w:
-            return
+    def draw_lane_markings(self, scroll: float):
+        """Draw dashed lane dividers that scroll."""
+        dash_len = 40
+        gap_len = 30
+        cycle = dash_len + gap_len
+        offset = scroll % cycle
 
-        iw          = SIDEBAR_IW
-        sy          = max(1, self.h // 2 - SIDEBAR_H // 2)
-        BASE_SPEED  = 0.37
-        MAX_SPEED   = BASE_SPEED + 14 * 0.12
-        speed_pct   = min((speed - BASE_SPEED) / max(MAX_SPEED - BASE_SPEED, 0.01), 1.0)
-        bar_len     = iw - 4
-        bar_str     = "|" * int(speed_pct * bar_len) + "." * (bar_len - int(speed_pct * bar_len))
-        bar_color   = CP_RED if speed_pct > 0.65 else CP_YELLOW
-        tip         = LEVEL_TIPS[min(level - 1, len(LEVEL_TIPS) - 1)]
-        cars_to_next = 5 - (score % 5)
+        for lane in range(1, NUM_LANES):
+            x = ROAD_LEFT + lane * LANE_WIDTH
+            y = -offset
+            while y < self.h:
+                if y + dash_len > 0:
+                    top = max(0, int(y))
+                    bot = min(self.h, int(y + dash_len))
+                    pygame.draw.rect(self.screen, COL_LANE_MARK,
+                                     (x - 2, top, 4, bot - top))
+                y += cycle
 
-        sep = "+" + "-" * iw + "+"
-        top = "+" + "=" * iw + "+"
+    def draw_road_grime(self, scroll: float):
+        """Subtle road texture lines to break up flat asphalt."""
+        rng = random.Random(42)
+        for i in range(20):
+            rx = rng.randint(ROAD_LEFT + 5, ROAD_RIGHT - 5)
+            ry = (rng.randint(0, self.h) + int(scroll * 0.3)) % self.h
+            pygame.draw.line(self.screen, COL_ASPHALT_L,
+                             (rx, ry), (rx + rng.randint(-5, 5), ry + rng.randint(2, 8)), 1)
 
-        def row(content: str) -> str:
-            return f"|{content:<{iw}}|"
+    def draw_trees(self, scroll: float):
+        """Draw scrolling trees on both sides of the road."""
+        spacing = 120
+        offset = scroll % spacing
 
-        lines = [
-            (top,                                        CP_YELLOW, curses.A_BOLD),
-            (row(f"{'  CAR  DODGE':^{iw}}"),             CP_YELLOW, curses.A_BOLD),
-            (top,                                        CP_YELLOW, curses.A_BOLD),
-            (row(f" SCORE  {score:05d}   "),             CP_WHITE,  curses.A_BOLD),
-            (row(f" BEST   {best:05d}   "),              CP_CYAN,   0),
-            (sep,                                        CP_WHITE,  curses.A_DIM),
-            (row(f" LEVEL  {level:02d}       "),         CP_GREEN,  curses.A_BOLD),
-            (row(f" NEXT   {cars_to_next} car{'s' if cars_to_next != 1 else ' '}  "),
-                                                         CP_WHITE,  curses.A_DIM),
-            (sep,                                        CP_WHITE,  curses.A_DIM),
-            (row(" SPEED          "),                    CP_WHITE,  0),
-            (row(f" [{bar_str}] "),                      bar_color, curses.A_BOLD),
-            (sep,                                        CP_WHITE,  curses.A_DIM),
-            (row(f" {tip}"),
-             CP_RED if speed_pct > 0.65 else CP_GREEN,
-             curses.A_BOLD | (curses.A_BLINK if speed_pct > 0.85 else 0)),
-            (sep,                                        CP_WHITE,  curses.A_DIM),
-            (row(" [</A] left      "),                   CP_WHITE,  curses.A_DIM),
-            (row(" [>/D] right     "),                   CP_WHITE,  curses.A_DIM),
-            (top,                                        CP_YELLOW, curses.A_BOLD),
-        ]
+        for y_base in range(-60, self.h + 60, spacing):
+            y = y_base + offset
+            # Left side trees
+            self.screen.blit(self.tree_surf, (ROAD_LEFT - 70, int(y)))
+            self.screen.blit(self.tree_surf, (ROAD_LEFT - 130, int(y) + 50))
+            # Right side trees
+            self.screen.blit(self.tree_surf, (ROAD_RIGHT + 30, int(y) + 30))
+            self.screen.blit(self.tree_surf, (ROAD_RIGHT + 90, int(y)))
 
-        for i, (text, color, extra) in enumerate(lines):
-            self._put(sy + i, sx, text, curses.color_pair(color) | extra)
+    def draw_car(self, surf: pygame.Surface, x: float, y: float):
+        """Draw a car surface at the given position."""
+        self.screen.blit(surf, (int(x), int(y)))
 
-    # ── cars ─────────────────────────────────────────────────────
-
-    def car(self, art: list[str], x: int, y: float,
-            color: int, bold: bool = False) -> None:
-        attr = curses.color_pair(color) | (curses.A_BOLD if bold else 0)
-        iy   = int(y)
-        for i, line in enumerate(art):
-            self._put(iy + i, x, line, attr)
-
-    def image_car(self, art_rows: list[list[tuple[str, int]]], x: int, y: float) -> None:
-        """Draw an image-based car (list of rows of (char, attr) pairs)."""
-        iy = int(y)
-        for row_i, row in enumerate(art_rows):
-            for col_i, (ch, attr) in enumerate(row):
-                self._ch(iy + row_i, x + col_i, ch, attr)
-
-    # ── HUD ──────────────────────────────────────────────────────
-
-    def hud(self, score: int, level: int) -> None:
-        filled = min(level, 15)
-        bar    = "|" * filled + "." * (15 - filled)
-        self._put(0, 0,
-                  f" SCORE:{score:05d}  LVL:{level:02d}  SPEED:[{bar}]  ".ljust(self.w - 1),
-                  curses.color_pair(CP_YELLOW) | curses.A_BOLD | curses.A_REVERSE)
-        self._put(self.h - 1, 0,
-                  " [</A] Left   [>/D] Right   [Q] Quit ".ljust(self.w - 1),
-                  curses.color_pair(CP_WHITE) | curses.A_REVERSE)
-
-    # ── game-over overlay ────────────────────────────────────────
-
-    def game_over_box(self, score: int, level: int,
-                      player_color: int = CP_WHITE) -> None:
-        box = [
-            "+--------------------------------------+",
-            "|                                      |",
-            "|          *** GAME OVER ***            |",
-            "|                                      |",
-            f"|   Final Score  : {score:<5d}                 |",
-            f"|   Level Reached: {level:<3d}                   |",
-            "|                                      |",
-            "|  [R] Again   [C] Colour   [Q] Quit   |",
-            "|                                      |",
-            "+--------------------------------------+",
-        ]
-        bh = len(box)
-        sy = self.h // 2 - bh // 2
-        sx = self.w // 2 - len(box[0]) // 2
-
-        for i, line in enumerate(box):
-            if i in (0, 2, bh - 1):
-                color, extra = CP_RED, curses.A_BOLD
-            elif i == 7:
-                color, extra = player_color, curses.A_BOLD
-            else:
-                color, extra = CP_WHITE, curses.A_BOLD
-            self._put(sy + i, sx, line, curses.color_pair(color) | extra)
-
-    # ── speed effects ────────────────────────────────────────────
-
-    def speed_streaks(self, player_x: int, player_y: int, level: int) -> None:
+    def draw_speed_lines(self, player_x: float, player_y: float, level: int):
+        """Draw motion blur / speed lines behind the player car."""
         if level < 2:
             return
-        streak_len = min(level * 2, 10)
-        attr = curses.color_pair(CP_CYAN) | curses.A_DIM
-        for i in range(1, streak_len + 1):
-            row = player_y + CAR_H + i - 1
-            if 1 <= row < self.h - 1:
-                self._put(row, player_x, "│     │", attr)
+        intensity = min(level * 15, 180)
+        num_lines = min(level * 2, 12)
+        rng = random.Random(int(pygame.time.get_ticks() / 50))
 
-    def road_particles(self, scroll: float, level: int) -> None:
-        if level < 4:
+        for _ in range(num_lines):
+            lx = player_x + rng.randint(5, 50)
+            ly = player_y - rng.randint(10, 60)
+            length = rng.randint(20, 50 + level * 5)
+            alpha = rng.randint(min(40, intensity), max(40, intensity))
+            line_surf = pygame.Surface((2, length), pygame.SRCALPHA)
+            line_surf.fill((200, 220, 255, alpha))
+            self.screen.blit(line_surf, (int(lx), int(ly)))
+
+    def draw_road_particles(self, scroll: float, level: int):
+        """Small white dots zipping along the road at high speeds."""
+        if level < 3:
             return
-        fast = (scroll * 3) % (self.h - 2)
-        xs   = [ROAD_LEFT + 2, ROAD_LEFT + 9, ROAD_LEFT + 18,
-                ROAD_LEFT + 27, ROAD_LEFT + 33]
-        attr = curses.color_pair(CP_WHITE) | curses.A_DIM
-        for px in xs:
-            for gap in range(0, self.h, 7):
-                py = int(fast + gap) % (self.h - 2) + 1
-                self._ch(py, px, "·", attr)
-
-    # ── party poppers ────────────────────────────────────────────
-
-    def party_poppers(self, party_frame: int) -> None:
-        road_right = ROAD_LEFT + ROAD_WIDTH
-        x_start    = road_right + 2
-        x_end      = min(self.w - 1, road_right + SIDEBAR_X_OFF - 1)
-        if x_end <= x_start:
-            return
-
-        rng     = random.Random(party_frame // 3)
-        density = max(4, 18 - party_frame // 2)
-
-        for _ in range(density):
-            y  = rng.randint(1, self.h - 2)
-            x  = rng.randint(x_start, x_end - 1)
-            ch = rng.choice(_CONFETTI_CHARS)
-            cp = rng.choice(_CONFETTI_COLORS)
-            self._ch(y, x, ch, curses.color_pair(cp) | curses.A_BOLD)
-
-        if party_frame < 20:
-            battr = (curses.color_pair(CP_YELLOW) | curses.A_BOLD
-                     | (curses.A_BLINK if party_frame < 10 else 0))
-            self._put(self.h // 2, road_right + 2, " MILESTONE! ", battr)
-
-    # ── crash flash ──────────────────────────────────────────────
-
-    def flash(self, color: int, count: int = 4) -> None:
-        attr = curses.color_pair(color) | curses.A_REVERSE
+        count = min(level * 3, 25)
+        rng = random.Random(int(scroll * 10) % 999)
         for _ in range(count):
-            self.scr.bkgd(" ", attr)
-            self.scr.refresh()
-            time.sleep(0.08)
-            self.scr.bkgd(" ", 0)
-            self.scr.refresh()
-            time.sleep(0.06)
+            px = rng.randint(ROAD_LEFT + 5, ROAD_RIGHT - 5)
+            py = rng.randint(0, self.h)
+            alpha = rng.randint(30, 120)
+            dot = pygame.Surface((3, 3), pygame.SRCALPHA)
+            dot.fill((255, 255, 255, alpha))
+            self.screen.blit(dot, (px, py))
+
+    def draw_crash_flash(self):
+        """Full-screen red flash overlay."""
+        flash = pygame.Surface((self.w, self.h), pygame.SRCALPHA)
+        flash.fill((255, 30, 30, 120))
+        self.screen.blit(flash, (0, 0))

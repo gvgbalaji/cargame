@@ -1,17 +1,16 @@
-"""Abstract Factory for car creation."""
+"""Abstract Factory for car creation (Pygame version)."""
 
 import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-from .constants import ENEMY_ARTS, ENEMY_COLORS, PLAYER_ART, CP_YELLOW
+from .constants import COL_PLAYER_COLORS, COL_ENEMY_COLORS
 
 
 @dataclass
 class CarSpec:
-    art: list[str]   # list of strings, one per row
-    color: int       # curses color pair ID
-    car_type: str    # "player" | "enemy"
+    color: tuple       # (r, g, b)
+    car_type: str      # "player" | "enemy"
 
 
 class CarFactory(ABC):
@@ -21,17 +20,16 @@ class CarFactory(ABC):
 
 
 class PlayerCarFactory(CarFactory):
-    def __init__(self, color: int = CP_YELLOW):
+    def __init__(self, color: tuple = (30, 120, 255)):
         self._color = color
 
     def create(self) -> CarSpec:
-        return CarSpec(art=PLAYER_ART, color=self._color, car_type="player")
+        return CarSpec(color=self._color, car_type="player")
 
 
 class EnemyCarFactory(CarFactory):
     def create(self) -> CarSpec:
         return CarSpec(
-            art=random.choice(ENEMY_ARTS),
-            color=random.choice(ENEMY_COLORS),
+            color=random.choice(COL_ENEMY_COLORS),
             car_type="enemy",
         )

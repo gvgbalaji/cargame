@@ -1,174 +1,254 @@
-"""Core game loop and logic."""
+"""Core game loop and logic (Pygame version)."""
 
-import curses
 import random
-import time
+import pygame
 
-from .constants import CAR_H, CAR_W, NUM_LANES, PLAYER_ART, CP_RED, CAR_SKINS, lane_x
+from .constants import (
+    WIDTH, HEIGHT, FPS, CAR_W, CAR_H, NUM_LANES,
+    COL_PLAYER_COLORS, lane_car_x,
+)
+from .cars import make_car_surface
 from .enemy import Enemy
 from .renderer import Renderer
+from .hud import HUD
 from .sound import play_crash_sound, play_lane_switch_sound, play_pass_sound, set_sound_config
 
 
 class Game:
-    FPS        = 20
-    FRAME_TIME = 1.0 / FPS
+    """One game session: handles logic, rendering, input."""
 
-    def __init__(self, scr, skin_index: int = 0, sound_theme: str = "engine"):
-        self.scr          = scr
-        self.r            = Renderer(scr)
-        self.best_score   = 0
-        # Derive player color from chosen skin
-        self.player_color = CAR_SKINS[skin_index][2] if 0 <= skin_index < len(CAR_SKINS) else CAR_SKINS[0][2]
+    BASE_SPEED   = 3.0    # pixels per frame at level 1
+    SPEED_STEP   = 0.8    # extra px/frame per level
+
+    def __init__(self, screen: pygame.Surface, skin_index: int = 0,
+                 sound_theme: str = "engine"):
+        self.screen     = screen
+        self.clock      = pygame.time.Clock()
+        self.renderer   = Renderer(screen)
+        self.hud        = HUD()
+        self.best_score = 0
+
+        self._set_skin(skin_index)
         set_sound_config(enabled=(sound_theme != "silent"), theme=sound_theme)
 
-    def set_skin(self, skin_index: int) -> None:
-        self.player_color = CAR_SKINS[skin_index][2] if 0 <= skin_index < len(CAR_SKINS) else CAR_SKINS[0][2]
+    def _set_skin(self, skin_index: int):
+        idx = skin_index if 0 <= skin_index < len(COL_PLAYER_COLORS) else 0
+        self.player_color = COL_PLAYER_COLORS[idx][1]
+        self.player_surface = make_car_surface(self.player_color, is_player=True)
 
-    # ── session reset ────────────────────────────────────────────
+    def set_skin(self, skin_index: int):
+        self._set_skin(skin_index)
 
-    def _reset(self) -> None:
-        self.player_lane = 1
-        self.player_y    = self.r.h - CAR_H - 6
+    # ── session reset ───────────────────────────────────────────
+
+    def _reset(self):
+        self.player_lane    = 1
+        self.player_y       = HEIGHT - CAR_H - 60
+        self.player_target_x = lane_car_x(self.player_lane)
+        self.player_x       = self.player_target_x
         self.enemies: list[Enemy] = []
-        self.score       = 0
-        self.level       = 1
-        self.scroll      = 0.0
-        self.spawn_cd    = 14
-        self.party_timer = 0
+        self.score          = 0
+        self.level          = 1
+        self.scroll         = 0.0
+        self.spawn_cd       = 60  # frames until first spawn
+        self.party_timer    = 0
+        self.crash_flash    = 0
 
-    # ── derived properties ───────────────────────────────────────
+    # ── derived properties ──────────────────────────────────────
 
     @property
     def _speed(self) -> float:
-        return 0.37 + (self.level - 1) * 0.12
+        return self.BASE_SPEED + (self.level - 1) * self.SPEED_STEP
+
+    @property
+    def _speed_pct(self) -> float:
+        max_speed = self.BASE_SPEED + 14 * self.SPEED_STEP
+        return min((self._speed - self.BASE_SPEED) /
+                   max(max_speed - self.BASE_SPEED, 0.01), 1.0)
+
+    @property
+    def _speed_display(self) -> int:
+        """Display speed as a 'km/h' number for the gauge."""
+        return int(60 + self._speed_pct * 220)
 
     @property
     def _spawn_interval(self) -> int:
-        return max(8, 28 - self.level * 2)
+        """Frames between spawns — decreases with level."""
+        return max(30, 90 - self.level * 6)
 
-    # ── per-frame logic ──────────────────────────────────────────
+    # ── per-frame logic ─────────────────────────────────────────
 
-    def _update(self) -> None:
+    def _update(self, dt: float):
         spd = self._speed
-        self.scroll = (self.scroll + spd) % 4
+        self.scroll += spd
 
+        # Smooth lane transition
+        diff = self.player_target_x - self.player_x
+        self.player_x += diff * 0.2
+
+        # Spawn enemies
         self.spawn_cd -= 1
         if self.spawn_cd <= 0:
             self._spawn()
             self.spawn_cd = self._spawn_interval
 
+        # Move enemies
         for e in self.enemies:
             e.y += spd
             if not e.passed and e.y > self.player_y + CAR_H:
-                e.passed     = True
-                self.score  += 1
-                self.level   = 1 + self.score // 5
+                e.passed = True
+                self.score += 1
+                self.level = 1 + self.score // 5
                 play_pass_sound()
+                self.hud.add_popup("+1", e.x + e.width // 2, e.y)
                 if self.score % 20 == 0:
-                    self.party_timer = 40
+                    self.party_timer = 80
 
-        self.enemies = [e for e in self.enemies if e.y < self.r.h + CAR_H]
+        self.enemies = [e for e in self.enemies if e.y < HEIGHT + e.height]
 
-    def _spawn(self) -> None:
-        taken = {e.lane for e in self.enemies if e.y < CAR_H + 4}
-        free  = [l for l in range(NUM_LANES) if l not in taken]
+        # Update popups
+        self.hud.update_popups(dt)
+
+    def _spawn(self):
+        taken = {e.lane for e in self.enemies if e.y < e.height + 30}
+        free = [l for l in range(NUM_LANES) if l not in taken]
         if free:
             self.enemies.append(Enemy(random.choice(free)))
 
     def _collide(self) -> bool:
-        px, py = lane_x(self.player_lane), self.player_y
-        return any(
-            abs(px - e.x) < CAR_W - 1 and abs(py - e.y) < CAR_H
-            for e in self.enemies
-        )
-
-    def _handle_input(self) -> bool:
-        """Return False if the player pressed Q (quit)."""
-        k = self.scr.getch()
-        if k in (curses.KEY_LEFT, ord("a"), ord("A")):
-            new_lane = max(0, self.player_lane - 1)
-            if new_lane != self.player_lane:
-                self.player_lane = new_lane
-                play_lane_switch_sound()
-        elif k in (curses.KEY_RIGHT, ord("d"), ord("D")):
-            new_lane = min(NUM_LANES - 1, self.player_lane + 1)
-            if new_lane != self.player_lane:
-                self.player_lane = new_lane
-                play_lane_switch_sound()
-        elif k in (ord("q"), ord("Q")):
-            return False
-        return True
-
-    def _draw(self) -> None:
-        self.scr.erase()
-        self.r.road(self.scroll)
-        self.r.road_particles(self.scroll, self.level)
-        self.r.scenery(self.scroll)
+        px, py = self.player_x, self.player_y
+        pw, ph = CAR_W, CAR_H
         for e in self.enemies:
-            self.r.car(e.art, e.x, e.y, e.color)
-        px = lane_x(self.player_lane)
-        self.r.speed_streaks(px, self.player_y, self.level)
-        self.r.car(PLAYER_ART, px, self.player_y, self.player_color, bold=True)
-        self.r.hud(self.score, self.level)
-        self.r.sidebar(self.score, self.best_score, self.level, self._speed)
+            ex, ew, eh = e.x, e.width, e.height
+            # AABB overlap with some tolerance
+            overlap_x = (px + pw - 10 > ex + 10) and (ex + ew - 10 > px + 10)
+            overlap_y = (py + ph - 10 > e.y + 10) and (e.y + eh - 10 > py + 10)
+            if overlap_x and overlap_y:
+                return True
+        return False
+
+    def _handle_input(self) -> str | None:
+        """Return 'quit' to exit, None to keep playing."""
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return "quit"
+            if event.type == pygame.KEYDOWN:
+                if event.key in (pygame.K_LEFT, pygame.K_a):
+                    new = max(0, self.player_lane - 1)
+                    if new != self.player_lane:
+                        self.player_lane = new
+                        self.player_target_x = lane_car_x(self.player_lane)
+                        play_lane_switch_sound()
+                elif event.key in (pygame.K_RIGHT, pygame.K_d):
+                    new = min(NUM_LANES - 1, self.player_lane + 1)
+                    if new != self.player_lane:
+                        self.player_lane = new
+                        self.player_target_x = lane_car_x(self.player_lane)
+                        play_lane_switch_sound()
+                elif event.key == pygame.K_q:
+                    return "quit"
+        return None
+
+    def _draw(self):
+        # Background, road, scenery
+        self.renderer.draw_background()
+        self.renderer.draw_road_grime(self.scroll)
+        self.renderer.draw_lane_markings(self.scroll)
+        self.renderer.draw_trees(self.scroll)
+        self.renderer.draw_road_particles(self.scroll, self.level)
+
+        # Enemy cars
+        for e in self.enemies:
+            self.renderer.draw_car(e.surface, e.x, e.y)
+
+        # Speed lines behind player
+        self.renderer.draw_speed_lines(self.player_x, self.player_y, self.level)
+
+        # Player car
+        self.renderer.draw_car(self.player_surface, self.player_x, self.player_y)
+
+        # HUD
+        cars_to_next = 5 - (self.score % 5)
+        self.hud.draw_top_bar(self.screen, self.score, self.level,
+                              self.best_score, cars_to_next)
+        self.hud.draw_speedometer(self.screen, self._speed_pct, self._speed_display)
+        self.hud.draw_controls(self.screen)
+        self.hud.draw_popups(self.screen)
+
         if self.party_timer > 0:
-            self.r.party_poppers(40 - self.party_timer)
+            self.hud.draw_milestone(self.screen, 80 - self.party_timer)
             self.party_timer -= 1
-        self.scr.refresh()
 
-    # ── crash sequence ───────────────────────────────────────────
+        if self.crash_flash > 0:
+            self.renderer.draw_crash_flash()
+            self.crash_flash -= 1
 
-    def _crash(self) -> None:
-        if self.score > self.best_score:
+        pygame.display.flip()
+
+    # ── crash sequence ──────────────────────────────────────────
+
+    def _crash(self) -> str:
+        """Show crash + game over. Return 'restart', 'customize', or 'quit'."""
+        is_new_best = self.score > self.best_score
+        if is_new_best:
             self.best_score = self.score
         play_crash_sound()
-        curses.beep()
-        self.r.flash(CP_RED)
-        self.scr.erase()
-        self.r.road(self.scroll)
-        self.r.scenery(self.scroll)
-        self.r.car(PLAYER_ART, lane_x(self.player_lane),
-                   self.player_y, CP_RED, bold=True)
-        self.r.game_over_box(self.score, self.level, self.player_color)
-        self.scr.refresh()
 
-    # ── public API ───────────────────────────────────────────────
+        # Flash effect
+        for _ in range(6):
+            self.renderer.draw_crash_flash()
+            pygame.display.flip()
+            pygame.time.delay(60)
+            self._draw_static_scene()
+            pygame.display.flip()
+            pygame.time.delay(40)
+
+        # Game over screen loop
+        while True:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    return "quit"
+                if event.type == pygame.KEYDOWN:
+                    if event.key in (pygame.K_r,):
+                        return "restart"
+                    if event.key in (pygame.K_c,):
+                        return "customize"
+                    if event.key in (pygame.K_q,):
+                        return "quit"
+
+            self._draw_static_scene()
+            self.hud.draw_game_over(self.screen, self.score, self.level,
+                                    self.best_score, is_new_best)
+            pygame.display.flip()
+            self.clock.tick(FPS)
+
+    def _draw_static_scene(self):
+        """Draw the frozen game scene (no animation)."""
+        self.renderer.draw_background()
+        self.renderer.draw_lane_markings(self.scroll)
+        self.renderer.draw_trees(self.scroll)
+        for e in self.enemies:
+            self.renderer.draw_car(e.surface, e.x, e.y)
+        self.renderer.draw_car(self.player_surface, self.player_x, self.player_y)
+
+    # ── public API ──────────────────────────────────────────────
 
     def play(self) -> str:
         """
         Run one game session.
-        Returns "restart"   → play again with same skin
-                "customize" → go back to the customization screen
-                "quit"      → exit
+        Returns "restart" / "customize" / "quit".
         """
         self._reset()
-        self.scr.nodelay(True)
 
         while True:
-            t0 = time.monotonic()
+            dt = self.clock.tick(FPS) / 1000.0
 
-            if not self._handle_input():
-                return "quit"
+            result = self._handle_input()
+            if result:
+                return result
 
-            self._update()
+            self._update(dt)
             self._draw()
 
             if self._collide():
-                break
-
-            gap = self.FRAME_TIME - (time.monotonic() - t0)
-            if gap > 0:
-                time.sleep(gap)
-
-        self._crash()
-
-        self.scr.nodelay(False)
-        while True:
-            k = self.scr.getch()
-            if k in (ord("r"), ord("R")):
-                return "restart"
-            if k in (ord("c"), ord("C")):
-                return "customize"
-            if k in (ord("q"), ord("Q")):
-                return "quit"
+                return self._crash()
