@@ -4,21 +4,26 @@ import curses
 import random
 import time
 
-from .constants import CAR_H, CAR_W, CP_YELLOW, NUM_LANES, PLAYER_ART, CP_RED, lane_x
+from .constants import CAR_H, CAR_W, NUM_LANES, PLAYER_ART, CP_RED, CAR_SKINS, lane_x
 from .enemy import Enemy
 from .renderer import Renderer
-from .sound import play_crash_sound, play_pass_sound
+from .sound import play_crash_sound, play_lane_switch_sound, play_pass_sound, set_sound_config
 
 
 class Game:
     FPS        = 20
     FRAME_TIME = 1.0 / FPS
 
-    def __init__(self, scr, player_color: int = CP_YELLOW):
+    def __init__(self, scr, skin_index: int = 0, sound_theme: str = "engine"):
         self.scr          = scr
         self.r            = Renderer(scr)
         self.best_score   = 0
-        self.player_color = player_color
+        # Derive player color from chosen skin
+        self.player_color = CAR_SKINS[skin_index][2] if 0 <= skin_index < len(CAR_SKINS) else CAR_SKINS[0][2]
+        set_sound_config(enabled=(sound_theme != "silent"), theme=sound_theme)
+
+    def set_skin(self, skin_index: int) -> None:
+        self.player_color = CAR_SKINS[skin_index][2] if 0 <= skin_index < len(CAR_SKINS) else CAR_SKINS[0][2]
 
     # ── session reset ────────────────────────────────────────────
 
@@ -82,9 +87,15 @@ class Game:
         """Return False if the player pressed Q (quit)."""
         k = self.scr.getch()
         if k in (curses.KEY_LEFT, ord("a"), ord("A")):
-            self.player_lane = max(0, self.player_lane - 1)
+            new_lane = max(0, self.player_lane - 1)
+            if new_lane != self.player_lane:
+                self.player_lane = new_lane
+                play_lane_switch_sound()
         elif k in (curses.KEY_RIGHT, ord("d"), ord("D")):
-            self.player_lane = min(NUM_LANES - 1, self.player_lane + 1)
+            new_lane = min(NUM_LANES - 1, self.player_lane + 1)
+            if new_lane != self.player_lane:
+                self.player_lane = new_lane
+                play_lane_switch_sound()
         elif k in (ord("q"), ord("Q")):
             return False
         return True
@@ -127,8 +138,8 @@ class Game:
     def play(self) -> str:
         """
         Run one game session.
-        Returns "restart"   → play again with same colour
-                "customize" → go back to the colour picker
+        Returns "restart"   → play again with same skin
+                "customize" → go back to the customization screen
                 "quit"      → exit
         """
         self._reset()

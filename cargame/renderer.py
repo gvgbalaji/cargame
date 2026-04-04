@@ -5,7 +5,7 @@ import random
 import time
 
 from .constants import (
-    CAR_H, CP_CYAN, CP_GREEN, CP_MAGENTA, CP_RED, CP_WHITE, CP_YELLOW,
+    CAR_H, CAR_W, CP_CYAN, CP_GREEN, CP_MAGENTA, CP_RED, CP_WHITE, CP_YELLOW,
     GRASS_EXTRA_W, LEVEL_TIPS, NUM_LANES, ROAD_LEFT, ROAD_WIDTH,
     SIDEBAR_H, SIDEBAR_IW, SIDEBAR_X_OFF, TREE_COL_1, TREE_COL_2,
     LANE_WIDTH,
@@ -133,6 +133,13 @@ class Renderer:
         iy   = int(y)
         for i, line in enumerate(art):
             self._put(iy + i, x, line, attr)
+
+    def image_car(self, art_rows: list[list[tuple[str, int]]], x: int, y: float) -> None:
+        """Draw an image-based car (list of rows of (char, attr) pairs)."""
+        iy = int(y)
+        for row_i, row in enumerate(art_rows):
+            for col_i, (ch, attr) in enumerate(row):
+                self._ch(iy + row_i, x + col_i, ch, attr)
 
     # ── HUD ──────────────────────────────────────────────────────
 

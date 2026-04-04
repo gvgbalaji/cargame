@@ -1,16 +1,19 @@
-import random
+from __future__ import annotations
 
-from .constants import ENEMY_ARTS, ENEMY_COLORS, lane_x
+from .constants import lane_x
+from .factory import CarSpec, EnemyCarFactory
 
 
 class Enemy:
     __slots__ = ("lane", "y", "art", "color", "passed")
 
-    def __init__(self, lane: int):
+    def __init__(self, lane: int, spec: CarSpec | None = None):
+        if spec is None:
+            spec = EnemyCarFactory().create()
         self.lane   = lane
         self.y      = 1.0
-        self.art    = random.choice(ENEMY_ARTS)
-        self.color  = random.choice(ENEMY_COLORS)
+        self.art    = spec.art
+        self.color  = spec.color
         self.passed = False
 
     @property

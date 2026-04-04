@@ -30,12 +30,10 @@ CP_MAGENTA = 6
 CP_WHITE   = 7
 
 # ── Car artwork (7 wide × 3 tall) ──────────────────────────────
-# Player: top-down sedan view — rounded body (╭╮╰╯), windshield (░░), mirror (▴)
-# Matches the rounded red car silhouette: curved front/rear, glass panels visible
 PLAYER_ART = [
-    "╭─░░░─╮",   # rounded front hood + windshield glass
-    "│ ─▴─ │",   # cabin roof + rearview mirror stalk
-    "╰─░░░─╯",   # rounded rear + rear window glass
+    "╭─░░░─╮",
+    "│ ─▴─ │",
+    "╰─░░░─╯",
 ]
 
 ENEMY_ARTS = [
@@ -56,6 +54,21 @@ PLAYER_COLOR_OPTIONS: list[tuple[str, int]] = [
     ("MAGENTA", CP_MAGENTA),
     ("WHITE",   CP_WHITE),
     ("RED",     CP_RED),
+]
+
+# ── Car skin options (name, PNG path, curses color for in-game) ──
+# Images shown in customization screen only; game uses Unicode art + color.
+CAR_SKINS: list[tuple[str, str, int]] = [
+    ("BLUE",  "/home/gv/Downloads/icons8-car-48.png", CP_CYAN),
+    ("RED",   "/home/gv/Downloads/icons8-car-64.png", CP_RED),
+]
+
+# ── Sound theme options ─────────────────────────────────────────
+SOUND_THEMES: list[tuple[str, str, str]] = [
+    ("ENGINE", "engine", "Realistic engine buzz"),
+    ("RETRO",  "retro",  "Arcade beeps & booms"),
+    ("MINIMAL","minimal","Whoosh & screech"),
+    ("SILENT", "silent", "No sound"),
 ]
 
 LEVEL_TIPS = [
