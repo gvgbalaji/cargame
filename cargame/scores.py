@@ -36,6 +36,16 @@ def save_score(score: int, level: int) -> None:
         """)
 
 
+def get_best_score() -> int:
+    """Return the all-time best score from the DB."""
+    try:
+        with sqlite3.connect(_DB) as conn:
+            row = conn.execute("SELECT MAX(score) FROM scores").fetchone()
+            return row[0] or 0
+    except Exception:
+        return 0
+
+
 def get_top5() -> list[tuple[int, int, str]]:
     """Return [(score, level, datetime_str), ...] top 5 by score."""
     with sqlite3.connect(_DB) as conn:

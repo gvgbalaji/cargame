@@ -10,13 +10,14 @@ from .constants import (
     lane_car_x,
 )
 from .cars import make_player_surface, PLAYER_STYLES
-from .enemy import Enemy, Tanker, Bomb, Bullet, _load_vehicles, _load_tanker, _load_bomb
+from .enemy import (Enemy, Tanker, Bomb, Bullet, PowerUp,
+                    _load_vehicles, _load_tanker, _load_bomb, _load_powerup_surfaces)
 from .renderer import Renderer
 from .hud import HUD
 from .sound import (play_crash_sound, play_lane_switch_sound, play_pass_sound,
                     set_sound_config, toggle_sound, is_sound_enabled,
                     play_background_music, stop_background_music)
-from .scores import init_db, save_score, get_top5
+from .scores import init_db, save_score, get_top5, get_best_score
 
 
 class Game:
@@ -40,11 +41,13 @@ class Game:
         self._set_skin(skin_index)
         set_sound_config(enabled=(sound_theme != "silent"), theme=sound_theme)
         init_db()
+        self.db_best = get_best_score()
 
         # Pre-warm asset loading to prevent first-game lag
         _load_vehicles()
         _load_tanker()
         _load_bomb()
+        _load_powerup_surfaces()
 
     def _set_skin(self, skin_index: int):
         idx = skin_index % len(PLAYER_STYLES)
@@ -60,9 +63,10 @@ class Game:
         self.player_y       = HEIGHT - CAR_H - 60
         self.player_target_x = lane_car_x(self.player_lane)
         self.player_x       = self.player_target_x
-        self.enemies: list[Enemy]  = []
-        self.bombs:   list[Bomb]   = []
-        self.bullets: list[Bullet] = []
+        self.enemies:  list[Enemy]   = []
+        self.bombs:    list[Bomb]    = []
+        self.bullets:  list[Bullet]  = []
+        self.powerups: list[PowerUp] = []
         self.score          = 0
         self.level          = 1
         self.scroll         = 0.0
@@ -77,6 +81,9 @@ class Game:
         # Shooting power
         self.shoot_powers       = 0
         self._last_shoot_score  = 0
+
+        # Road power-up pickups
+        self._last_powerup_score = 0
 
         # Confetti & new fact
         self.hud.confetti.clear()
@@ -197,6 +204,48 @@ class Game:
                     self.hud.add_popup("+1 HIT!", int(e.x + e.width / 2),
                                        int(e.y - 30), (255, 140, 40))
         self.bullets = [bl for bl in self.bullets if bl.active]
+
+        # Spawn road power-up every 40 points (only when player has no powers)
+        if (self.score >= 40
+                and self.score // 40 > self._last_powerup_score // 40
+                and not self.powerups):
+            self._last_powerup_score = self.score
+            has_boost = self.boost_powers > 0
+            has_fire  = self.shoot_powers > 0
+            # Determine which kinds are offerable
+            choices = []
+            if not has_boost:
+                choices.append("boost")
+            if not has_fire and not has_boost:   # don't offer fire if already has boost
+                choices.append("fire")
+            if choices:
+                taken = {e.lane for e in self.enemies if e.y > 0}
+                taken |= {p.lane for p in self.powerups}
+                free = [l for l in range(NUM_LANES) if l not in taken]
+                if free:
+                    kind = random.choice(choices)
+                    lane = random.choice(free)
+                    self.powerups.append(PowerUp(lane, kind))
+
+        # Move and tick power-ups; collect on player overlap
+        px, py = self.player_x, self.player_y
+        pw, ph = CAR_W, CAR_H
+        for pu in self.powerups:
+            pu.y += spd
+            if not pu.collected:
+                # Collision with player car
+                if (px + pw - 10 > pu.x + 4 and pu.x + pu.width - 4 > px + 10
+                        and py + ph - 10 > pu.y + 4 and pu.y + pu.height - 4 > py + 10):
+                    pu.collected = True
+                    if pu.kind == "fire":
+                        self.shoot_powers += 1
+                        self.hud.add_popup("FIRE +1!", int(pu.x), int(pu.y),
+                                           (100, 180, 255))
+                    else:
+                        self.boost_powers += 1
+                        self.hud.add_popup("BOOST +1!", int(pu.x), int(pu.y),
+                                           (200, 140, 255))
+        self.powerups = [pu for pu in self.powerups if pu.tick(dt) and pu.y < HEIGHT + pu.height]
 
         # Update popups & confetti
         self.hud.update_popups(dt)
@@ -322,6 +371,45 @@ class Game:
                               by_draw + b.height // 2 - glow_r))
             self.screen.blit(b.surface, (bx_draw, by_draw))
 
+        # Road power-up pickups
+        ticks = pygame.time.get_ticks()
+        for pu in self.powerups:
+            if pu.collected:
+                continue
+            cx = self.renderer.road_curve(pu.y + pu.height / 2, self.scroll)
+            px_draw = int(pu.x + cx)
+            py_draw = int(pu.y)
+            # Blink when timer < 0.7s (last 35% of life)
+            if pu.timer_started and pu.timer < 0.7:
+                if int(ticks / 120) % 2 == 0:
+                    continue   # skip this frame = blink
+            # Glow ring behind icon
+            glow_color = (60, 120, 255, 80) if pu.kind == "fire" else (180, 80, 255, 80)
+            glow_r = pu.SIZE // 2 + 10
+            glow_surf = pygame.Surface((glow_r * 2, glow_r * 2), pygame.SRCALPHA)
+            pygame.draw.circle(glow_surf, glow_color, (glow_r, glow_r), glow_r)
+            self.screen.blit(glow_surf,
+                             (px_draw + pu.SIZE // 2 - glow_r,
+                              py_draw + pu.SIZE // 2 - glow_r))
+            # Icon itself
+            if pu.surface:
+                self.screen.blit(pu.surface, (px_draw, py_draw))
+            else:
+                col = (60, 140, 255) if pu.kind == "fire" else (160, 80, 255)
+                pygame.draw.circle(self.screen, col,
+                                   (px_draw + pu.SIZE // 2, py_draw + pu.SIZE // 2),
+                                   pu.SIZE // 2)
+            # Timer bar below icon
+            if pu.timer_started:
+                bar_w = pu.SIZE
+                frac  = max(0, pu.timer / PowerUp.LIFETIME)
+                bar_col = (80, 200, 80) if frac > 0.5 else (255, 160, 0) if frac > 0.25 else (255, 60, 60)
+                pygame.draw.rect(self.screen, (30, 30, 40),
+                                 (px_draw, py_draw + pu.SIZE + 3, bar_w, 4), border_radius=2)
+                pygame.draw.rect(self.screen, bar_col,
+                                 (px_draw, py_draw + pu.SIZE + 3, int(bar_w * frac), 4),
+                                 border_radius=2)
+
         # Player bullets — firepower lightning orbs flying upward
         fp_bullet = self.hud._firepower_bullet
         for bl in self.bullets:
@@ -359,7 +447,7 @@ class Game:
         # HUD
         cars_to_next = 5 - (self.score % 5)
         self.hud.draw_top_bar(self.screen, self.score, self.level,
-                              self.best_score, cars_to_next)
+                              self.db_best, cars_to_next)
         self.hud.draw_speedometer(self.screen, self._speed_pct, self._speed_display)
         self.hud.draw_controls(self.screen, self.boost_powers, self.shoot_powers)
         self.hud.draw_mute_icon(self.screen, is_sound_enabled())
@@ -389,10 +477,11 @@ class Game:
 
     def _crash(self) -> str:
         stop_background_music()
-        is_new_best = self.score > self.best_score
+        is_new_best = self.score > self.db_best
         if is_new_best:
             self.best_score = self.score
         save_score(self.score, self.level)
+        self.db_best = get_best_score()   # refresh from DB after saving
         play_crash_sound()
 
         for _ in range(6):

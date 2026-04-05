@@ -11,6 +11,8 @@ from .constants import lane_center_x, CAR_W, CAR_H, LANE_WIDTH
 _vehicle_pool: list[pygame.Surface] | None = None
 _tanker_surface: pygame.Surface | None = None
 _bomb_surface: pygame.Surface | None = None
+_powerup_fire_surface: pygame.Surface | None = None
+_powerup_boost_surface: pygame.Surface | None = None
 
 _ASSET_DIR  = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets")
 _VEHICLES   = os.path.join(_ASSET_DIR, "vehicles")
@@ -100,6 +102,76 @@ def _load_bomb() -> pygame.Surface | None:
     except Exception:
         _bomb_surface = None
     return _bomb_surface
+
+
+def _load_powerup_surfaces() -> tuple["pygame.Surface | None", "pygame.Surface | None"]:
+    """Load fire and boost power-up icons (36×36) for road pickups."""
+    global _powerup_fire_surface, _powerup_boost_surface
+    if _powerup_fire_surface is not None:
+        return _powerup_fire_surface, _powerup_boost_surface
+
+    size = 36
+
+    # Fire power-up — firepower.png
+    fire_path = os.path.join(_ASSET_DIR, "firepower.png")
+    try:
+        raw = pygame.image.load(fire_path).convert_alpha()
+        _powerup_fire_surface = pygame.transform.smoothscale(raw, (size, size))
+    except Exception:
+        _powerup_fire_surface = None
+
+    # Boost power-up — booster.png
+    boost_path = os.path.join(_ASSET_DIR, "booster.png")
+    try:
+        raw = pygame.image.load(boost_path).convert_alpha()
+        _powerup_boost_surface = pygame.transform.smoothscale(raw, (size, size))
+    except Exception:
+        _powerup_boost_surface = None
+
+    return _powerup_fire_surface, _powerup_boost_surface
+
+
+class PowerUp:
+    """A collectible power-up (fire or boost) that scrolls down the road.
+
+    Timer starts once the icon enters the visible screen (y >= 0).
+    Disappears after LIFETIME seconds if not collected.
+    """
+    __slots__ = ("lane", "y", "kind", "surface", "width", "height",
+                 "timer", "timer_started", "collected")
+    LIFETIME = 2.0   # seconds visible before disappearing
+    SIZE     = 36    # icon size in pixels
+
+    def __init__(self, lane: int, kind: str):
+        self.lane         = lane
+        self.kind         = kind   # "fire" or "boost"
+        self.timer        = self.LIFETIME
+        self.timer_started = False
+        self.collected    = False
+
+        fire_surf, boost_surf = _load_powerup_surfaces()
+        if kind == "fire":
+            self.surface = fire_surf
+        else:
+            self.surface = boost_surf
+
+        self.width  = self.SIZE
+        self.height = self.SIZE
+        self.y      = float(-self.SIZE)   # start just above screen
+
+    @property
+    def x(self) -> float:
+        return lane_center_x(self.lane) - self.SIZE / 2
+
+    def tick(self, dt: float) -> bool:
+        """Update timer. Returns True while still alive."""
+        if self.collected:
+            return False
+        if self.y >= 0 and not self.timer_started:
+            self.timer_started = True
+        if self.timer_started:
+            self.timer -= dt
+        return self.timer > 0 and not self.collected
 
 
 class Enemy:

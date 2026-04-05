@@ -165,7 +165,9 @@ class HUD:
         score_val = self.font_large.render(str(score), True, COL_HUD_TEXT)
         screen.blit(score_val, (text_x, 32))
         screen.blit(self.font_tiny.render(f"BEST  {best}", True, COL_HUD_GOLD),
-                    (text_x, 66))
+                    (text_x, 55))
+        screen.blit(self.font_tiny.render("(all time)", True, COL_HUD_DIM),
+                    (text_x, 68))
 
         # ── Level panel (far right) with checkered flag ──────────
         lp_w, lp_h = 240, 90
