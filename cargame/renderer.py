@@ -415,11 +415,12 @@ class Renderer:
         if self._headlight_img is None:
             return
 
-        from .constants import CAR_W
+        from .constants import CAR_W, CAR_H
         img = self._headlight_img
-        # Center horizontally on the car, place above (in front of) the car
+        # Center horizontally on the car; bottom of headlight image sits at
+        # ~60% down the car so beams appear to emanate from the hood
         hx = int(player_x + CAR_W / 2 - img.get_width() / 2)
-        hy = int(player_y - img.get_height() + 20)
+        hy = int(player_y - img.get_height() + CAR_H * 0.6)
         self.screen.blit(img, (hx, hy))
 
     def draw_lane_markings(self, scroll: float):

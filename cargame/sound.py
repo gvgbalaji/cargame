@@ -4,6 +4,7 @@ Sound effects — uses pygame.mixer when available, falls back to wav+aplay.
 
 import io
 import math
+import os
 import random
 import struct
 import subprocess
@@ -18,15 +19,66 @@ try:
 except ImportError:
     pass
 
+_ASSET_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets")
+
 # ── Module-level sound config ────────────────────────────────────
 _enabled: bool = True
 _theme: str = "engine"
+_music_playing: bool = False
 
 
 def set_sound_config(enabled: bool, theme: str) -> None:
     global _enabled, _theme
     _enabled = enabled
     _theme = theme
+    if not enabled:
+        stop_background_music()
+
+
+def toggle_sound() -> bool:
+    """Toggle mute on/off. Returns True if sound is now enabled."""
+    global _enabled
+    _enabled = not _enabled
+    if not _enabled:
+        stop_background_music()
+    else:
+        play_background_music(_theme)
+    return _enabled
+
+
+def is_sound_enabled() -> bool:
+    return _enabled
+
+
+def play_background_music(theme: str) -> None:
+    """Start looping background music for themes that use it."""
+    global _music_playing
+    stop_background_music()
+    if not _enabled:
+        return
+    if theme != "race":
+        return
+    path = os.path.join(_ASSET_DIR, "sounds", "race.mp3")
+    if not os.path.isfile(path):
+        return
+    try:
+        pygame.mixer.music.load(path)
+        pygame.mixer.music.set_volume(0.55)
+        pygame.mixer.music.play(-1, 0.0)
+        _music_playing = True
+    except Exception:
+        pass
+
+
+def stop_background_music() -> None:
+    global _music_playing
+    if not _music_playing:
+        return
+    try:
+        pygame.mixer.music.stop()
+    except Exception:
+        pass
+    _music_playing = False
 
 
 def init_mixer():
@@ -216,7 +268,7 @@ def _lane_minimal() -> None:
 # ── Public API ───────────────────────────────────────────────────
 
 def play_crash_sound() -> None:
-    if not _enabled:
+    if not _enabled or _theme == "race":
         return
     try:
         {"retro": _crash_boom, "minimal": _crash_screech}.get(
@@ -226,7 +278,7 @@ def play_crash_sound() -> None:
 
 
 def play_lane_switch_sound() -> None:
-    if not _enabled:
+    if not _enabled or _theme == "race":
         return
     try:
         {"retro": _lane_retro, "minimal": _lane_minimal}.get(
@@ -236,7 +288,7 @@ def play_lane_switch_sound() -> None:
 
 
 def play_pass_sound() -> None:
-    if not _enabled:
+    if not _enabled or _theme == "race":
         return
     try:
         {"retro": _pass_beep, "minimal": _pass_whoosh}.get(

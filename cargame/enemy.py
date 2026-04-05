@@ -9,6 +9,8 @@ from .constants import lane_center_x, CAR_W, CAR_H, LANE_WIDTH
 
 # ── Vehicle sprite pool (loaded once) ───────────────────────────
 _vehicle_pool: list[pygame.Surface] | None = None
+_tanker_surface: pygame.Surface | None = None
+_bomb_surface: pygame.Surface | None = None
 
 _ASSET_DIR  = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets")
 _VEHICLES   = os.path.join(_ASSET_DIR, "vehicles")
@@ -19,6 +21,9 @@ _LARGE_W, _LARGE_H = 100, 120   # trucks, buses, semis
 
 # Names of the "large" vehicles (taller aspect ratio)
 _LARGE_NAMES = {"school_bus", "green_semi", "blue_truck"}
+
+# Special enemies handled separately — excluded from random pool
+_SPECIAL_ENEMIES = {"tanker"}
 
 
 def _load_vehicles() -> list[pygame.Surface]:
@@ -34,10 +39,12 @@ def _load_vehicles() -> list[pygame.Surface]:
     for fname in sorted(os.listdir(_VEHICLES)):
         if not fname.endswith(".png"):
             continue
+        stem = os.path.splitext(fname)[0]
+        if stem in _SPECIAL_ENEMIES:
+            continue  # handled as special enemy type
         path = os.path.join(_VEHICLES, fname)
         try:
             raw = pygame.image.load(path).convert_alpha()
-            stem = os.path.splitext(fname)[0]
             if stem in _LARGE_NAMES:
                 tw, th = _LARGE_W, _LARGE_H
             else:
@@ -54,6 +61,45 @@ def _load_vehicles() -> list[pygame.Surface]:
             continue
 
     return _vehicle_pool
+
+
+def _load_tanker() -> pygame.Surface | None:
+    """Load and scale the tanker vehicle image (same size as school_bus)."""
+    global _tanker_surface
+    if _tanker_surface is not None:
+        return _tanker_surface
+    path = os.path.join(_VEHICLES, "tanker.png")
+    try:
+        raw = pygame.image.load(path).convert_alpha()
+        # Keep original landscape orientation; fit within 115×75
+        tw, th = 115, 75
+        ow, oh = raw.get_size()
+        scale = min(tw / ow, th / oh)
+        nw = max(1, int(ow * scale))
+        nh = max(1, int(oh * scale))
+        _tanker_surface = pygame.transform.smoothscale(raw, (nw, nh))
+    except Exception:
+        _tanker_surface = None
+    return _tanker_surface
+
+
+def _load_bomb() -> pygame.Surface | None:
+    """Load and scale the bomb projectile image."""
+    global _bomb_surface
+    if _bomb_surface is not None:
+        return _bomb_surface
+    path = os.path.join(_ASSET_DIR, "bomb.png")
+    try:
+        raw = pygame.image.load(path).convert_alpha()
+        # Scale to 48px tall — large enough to dodge
+        ow, oh = raw.get_size()
+        scale = min(44 / ow, 48 / oh)
+        nw = max(1, int(ow * scale))
+        nh = max(1, int(oh * scale))
+        _bomb_surface = pygame.transform.smoothscale(raw, (nw, nh))
+    except Exception:
+        _bomb_surface = None
+    return _bomb_surface
 
 
 class Enemy:
@@ -81,3 +127,93 @@ class Enemy:
     def x(self) -> float:
         """Left x-pixel to center this enemy in its lane."""
         return lane_center_x(self.lane) - self.width / 2
+
+
+class Tanker:
+    """Special enemy that fires bomb projectiles after level 5."""
+    __slots__ = ("lane", "y", "surface", "width", "height", "passed",
+                 "fire_timer", "fire_interval", "burst_remaining", "burst_delay")
+
+    def __init__(self, lane: int):
+        self.lane   = lane
+        self.passed = False
+
+        surf = _load_tanker()
+        if surf is None:
+            # Fallback to a regular vehicle
+            pool = _load_vehicles()
+            surf = random.choice(pool) if pool else pygame.Surface((100, 80))
+        self.surface = surf
+        self.width  = self.surface.get_width()
+        self.height = self.surface.get_height()
+        self.y      = float(-self.height)
+
+        self.fire_timer     = random.uniform(0.3, 0.8)   # fire quickly after entering screen
+        self.fire_interval  = random.uniform(1.2, 2.2)  # seconds between shots
+        self.burst_remaining = 0      # extra shots in current burst
+        self.burst_delay    = 0.0     # countdown for next burst shot
+
+    @property
+    def x(self) -> float:
+        return lane_center_x(self.lane) - self.width / 2
+
+    def tick(self, dt: float) -> int:
+        """
+        Returns number of bombs to fire this frame.
+        Handles single shots and occasional 2-bomb bursts.
+        """
+        shots = 0
+
+        # Burst follow-up shot
+        if self.burst_remaining > 0:
+            self.burst_delay -= dt
+            if self.burst_delay <= 0:
+                shots += 1
+                self.burst_remaining -= 1
+                self.burst_delay = 0.35
+
+        # Main fire timer
+        self.fire_timer -= dt
+        if self.fire_timer <= 0:
+            self.fire_timer = self.fire_interval
+            shots += 1
+            # 40% chance of a quick second shot
+            if random.random() < 0.40 and self.burst_remaining == 0:
+                self.burst_remaining = 1
+                self.burst_delay = 0.35
+
+        return shots
+
+
+class Bomb:
+    """Projectile fired by a Tanker toward the player."""
+    __slots__ = ("x", "y", "surface", "width", "height", "passed", "speed_bonus")
+
+    def __init__(self, x: float, y: float):
+        surf = _load_bomb()
+        if surf is None:
+            # Fallback: orange-red circle bomb
+            size = 44
+            surf = pygame.Surface((size, size), pygame.SRCALPHA)
+            pygame.draw.circle(surf, (200, 60, 0), (size // 2, size // 2), size // 2)
+            pygame.draw.circle(surf, (255, 160, 40), (size // 2 - 5, size // 2 - 5), size // 5)
+        self.surface = surf
+        self.width  = surf.get_width()
+        self.height = surf.get_height()
+        self.x      = x - self.width / 2   # center on given x
+        self.y      = float(y)
+        self.passed = False
+        self.speed_bonus = random.uniform(2.5, 4.5)   # extra px/frame above scroll
+
+
+class Bullet:
+    """Player-fired projectile that travels upward toward enemies."""
+    __slots__ = ("x", "y", "active")
+    W      = 8
+    H      = 24
+    SPEED  = 16   # pixels per frame upward
+
+    def __init__(self, cx: float, bottom_y: float):
+        self.x      = cx - self.W / 2
+        self.y      = float(bottom_y - self.H)
+        self.active = True

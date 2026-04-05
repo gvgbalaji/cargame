@@ -63,6 +63,7 @@ SOUND_THEMES = [
     ("ENGINE",  "engine",  "Realistic engine buzz"),
     ("RETRO",   "retro",   "Arcade beeps & booms"),
     ("MINIMAL", "minimal", "Whoosh & screech"),
+    ("RACE",    "race",    "Race track music (MP3)"),
     ("SILENT",  "silent",  "No sound"),
 ]
 
