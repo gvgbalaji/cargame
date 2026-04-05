@@ -4,7 +4,7 @@ import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-from .constants import COL_PLAYER_COLORS, COL_ENEMY_COLORS
+from .constants import COL_ENEMY_COLORS
 
 
 @dataclass

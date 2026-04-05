@@ -130,9 +130,10 @@ class Renderer:
         num_lines = min(level * 2, 12)
         rng = random.Random(int(pygame.time.get_ticks() / 50))
 
+        from .constants import CAR_H as _CH
         for _ in range(num_lines):
             lx = player_x + rng.randint(5, 50)
-            ly = player_y - rng.randint(10, 60)
+            ly = player_y + _CH + rng.randint(5, 40)
             length = rng.randint(20, 50 + level * 5)
             alpha = rng.randint(min(40, intensity), max(40, intensity))
             line_surf = pygame.Surface((2, length), pygame.SRCALPHA)

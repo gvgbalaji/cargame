@@ -5,9 +5,9 @@ import pygame
 
 from .constants import (
     WIDTH, HEIGHT, FPS, CAR_W, CAR_H, NUM_LANES,
-    COL_PLAYER_COLORS, lane_car_x,
+    lane_car_x,
 )
-from .cars import make_car_surface
+from .cars import make_player_surface, PLAYER_STYLES
 from .enemy import Enemy
 from .renderer import Renderer
 from .hud import HUD
@@ -32,9 +32,8 @@ class Game:
         set_sound_config(enabled=(sound_theme != "silent"), theme=sound_theme)
 
     def _set_skin(self, skin_index: int):
-        idx = skin_index if 0 <= skin_index < len(COL_PLAYER_COLORS) else 0
-        self.player_color = COL_PLAYER_COLORS[idx][1]
-        self.player_surface = make_car_surface(self.player_color, is_player=True)
+        idx = skin_index % len(PLAYER_STYLES)
+        self.player_surface = make_player_surface(idx)
 
     def set_skin(self, skin_index: int):
         self._set_skin(skin_index)

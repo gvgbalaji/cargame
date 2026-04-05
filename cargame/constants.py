@@ -1,20 +1,20 @@
 # ── Window ────────────────────────────────────────────────────
-WIDTH  = 900
-HEIGHT = 650
+WIDTH  = 1200
+HEIGHT = 800
 FPS    = 60
 TITLE  = "Car Dodge"
 
 # ── Road layout (pixel coords) ───────────────────────────────
 NUM_LANES   = 3
-ROAD_LEFT   = 200
-ROAD_WIDTH  = 360
+ROAD_LEFT   = 150
+ROAD_WIDTH  = 480
 ROAD_RIGHT  = ROAD_LEFT + ROAD_WIDTH
 LANE_WIDTH  = ROAD_WIDTH // NUM_LANES
 ROAD_CENTER = ROAD_LEFT + ROAD_WIDTH // 2
 
 # ── Car dimensions (pixels) ──────────────────────────────────
-CAR_W = 60
-CAR_H = 110
+CAR_W = 110
+CAR_H = 150
 
 # ── Colors ────────────────────────────────────────────────────
 # Road / environment

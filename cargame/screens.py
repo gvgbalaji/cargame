@@ -7,10 +7,10 @@ from .constants import (
     WIDTH, HEIGHT, FPS,
     COL_HUD_BG, COL_HUD_BORDER, COL_HUD_TEXT, COL_HUD_ACCENT,
     COL_HUD_WARN, COL_HUD_GOOD, COL_HUD_GOLD, COL_HUD_DIM,
-    COL_PLAYER_COLORS, SOUND_THEMES,
+    SOUND_THEMES,
     COL_ASPHALT, COL_LANE_MARK, COL_GRASS,
 )
-from .cars import make_car_surface
+from .cars import make_player_surface, PLAYER_STYLES
 
 
 def _draw_bg(screen: pygame.Surface, tick: int):
@@ -123,7 +123,7 @@ def splash(screen: pygame.Surface) -> bool:
 
 
 def customization_screen(screen: pygame.Surface) -> tuple[int, str]:
-    """Car and sound theme picker. Returns (skin_index, sound_theme)."""
+    """Car style and sound theme picker. Returns (style_index, sound_theme)."""
     clock = pygame.time.Clock()
 
     font_title = pygame.font.SysFont("Arial", 36, bold=True)
@@ -131,15 +131,16 @@ def customization_screen(screen: pygame.Surface) -> tuple[int, str]:
     font_small = pygame.font.SysFont("Arial", 16)
     font_key   = pygame.font.SysFont("Arial", 14, bold=True)
 
-    skin_sel  = 0
+    style_sel = 0
     sound_sel = 0
     section   = 0  # 0 = car, 1 = sound
     tick      = 0
+    n_styles  = len(PLAYER_STYLES)
 
-    # Pre-build car preview surfaces
+    # Pre-build car preview surfaces (scaled up for display)
     car_previews = []
-    for _name, color in COL_PLAYER_COLORS:
-        car_previews.append(make_car_surface(color, is_player=True))
+    for i in range(n_styles):
+        car_previews.append(make_player_surface(i))
 
     while True:
         for event in pygame.event.get():
@@ -150,16 +151,16 @@ def customization_screen(screen: pygame.Surface) -> tuple[int, str]:
                     section = 1 - section
                 elif event.key in (pygame.K_LEFT, pygame.K_a):
                     if section == 0:
-                        skin_sel = (skin_sel - 1) % len(COL_PLAYER_COLORS)
+                        style_sel = (style_sel - 1) % n_styles
                     else:
                         sound_sel = (sound_sel - 1) % len(SOUND_THEMES)
                 elif event.key in (pygame.K_RIGHT, pygame.K_d):
                     if section == 0:
-                        skin_sel = (skin_sel + 1) % len(COL_PLAYER_COLORS)
+                        style_sel = (style_sel + 1) % n_styles
                     else:
                         sound_sel = (sound_sel + 1) % len(SOUND_THEMES)
                 elif event.key in (pygame.K_RETURN, pygame.K_SPACE):
-                    return (skin_sel, SOUND_THEMES[sound_sel][1])
+                    return (style_sel, SOUND_THEMES[sound_sel][1])
                 elif event.key == pygame.K_q:
                     return (0, "engine")
 
@@ -173,7 +174,7 @@ def customization_screen(screen: pygame.Surface) -> tuple[int, str]:
         car_active = (section == 0)
         car_border = COL_HUD_ACCENT if car_active else COL_HUD_DIM
 
-        car_panel = pygame.Rect(WIDTH // 2 - 340, 100, 300, 350)
+        car_panel = pygame.Rect(WIDTH // 2 - 340, 90, 300, 410)
         panel_s = pygame.Surface((car_panel.w, car_panel.h), pygame.SRCALPHA)
         pygame.draw.rect(panel_s, (10, 10, 15, 180),
                          (0, 0, car_panel.w, car_panel.h), border_radius=12)
@@ -185,30 +186,37 @@ def customization_screen(screen: pygame.Surface) -> tuple[int, str]:
         hdr = font_med.render("YOUR CAR", True, car_border)
         screen.blit(hdr, hdr.get_rect(center=(car_panel.centerx, car_panel.y + 25)))
 
-        # Car name with arrows
-        name = COL_PLAYER_COLORS[skin_sel][0]
+        # Car style name with arrows
+        style_name = PLAYER_STYLES[style_sel][0]
         arrow_color = COL_HUD_ACCENT if car_active else COL_HUD_DIM
         left_arr  = font_med.render("\u25C0", True, arrow_color)
         right_arr = font_med.render("\u25B6", True, arrow_color)
-        name_text = font_med.render(name, True, COL_HUD_GOLD)
+        name_text = font_med.render(style_name, True, COL_HUD_GOLD)
 
-        cy = car_panel.y + 60
-        screen.blit(left_arr, (car_panel.x + 30, cy))
+        cy = car_panel.y + 55
+        screen.blit(left_arr, (car_panel.x + 20, cy))
         screen.blit(name_text, name_text.get_rect(center=(car_panel.centerx, cy + 10)))
-        screen.blit(right_arr, (car_panel.right - 50, cy))
+        screen.blit(right_arr, (car_panel.right - 40, cy))
 
-        # Car preview (large, centered)
-        preview = car_previews[skin_sel]
-        big_preview = pygame.transform.scale(preview, (120, 220))
+        # Car preview (large, centered) with gentle bobbing
+        preview = car_previews[style_sel]
+        big_preview = pygame.transform.scale(preview, (150, 275))
+        bob = int(math.sin(tick * 0.05) * 3)
         preview_rect = big_preview.get_rect(
-            center=(car_panel.centerx, car_panel.y + 220))
+            center=(car_panel.centerx, car_panel.y + 240 + bob))
         screen.blit(big_preview, preview_rect)
+
+        # Style counter
+        counter = font_small.render(
+            f"{style_sel + 1} / {n_styles}", True, COL_HUD_DIM)
+        screen.blit(counter, counter.get_rect(
+            center=(car_panel.centerx, car_panel.y + 390)))
 
         # ── Sound section (right) ───────────────────────────────
         snd_active = (section == 1)
         snd_border = COL_HUD_ACCENT if snd_active else COL_HUD_DIM
 
-        snd_panel = pygame.Rect(WIDTH // 2 + 40, 100, 300, 350)
+        snd_panel = pygame.Rect(WIDTH // 2 + 40, 90, 300, 410)
         panel_s2 = pygame.Surface((snd_panel.w, snd_panel.h), pygame.SRCALPHA)
         pygame.draw.rect(panel_s2, (10, 10, 15, 180),
                          (0, 0, snd_panel.w, snd_panel.h), border_radius=12)
@@ -225,14 +233,14 @@ def customization_screen(screen: pygame.Surface) -> tuple[int, str]:
         snd_desc = SOUND_THEMES[sound_sel][2]
         sarr_color = COL_HUD_ACCENT if snd_active else COL_HUD_DIM
 
-        sy = snd_panel.y + 60
+        sy = snd_panel.y + 55
         la = font_med.render("\u25C0", True, sarr_color)
         ra = font_med.render("\u25B6", True, sarr_color)
         sn = font_med.render(snd_name, True, COL_HUD_GOLD)
 
-        screen.blit(la, (snd_panel.x + 30, sy))
+        screen.blit(la, (snd_panel.x + 20, sy))
         screen.blit(sn, sn.get_rect(center=(snd_panel.centerx, sy + 10)))
-        screen.blit(ra, (snd_panel.right - 50, sy))
+        screen.blit(ra, (snd_panel.right - 40, sy))
 
         # Description
         desc_text = font_small.render(snd_desc, True, COL_HUD_DIM)
@@ -253,13 +261,17 @@ def customization_screen(screen: pygame.Surface) -> tuple[int, str]:
                              (bx_pos, bar_y + 100 - bh, 10, bh),
                              border_radius=3)
 
+        # Sound counter
+        snd_counter = font_small.render(
+            f"{sound_sel + 1} / {len(SOUND_THEMES)}", True, COL_HUD_DIM)
+        screen.blit(snd_counter, snd_counter.get_rect(
+            center=(snd_panel.centerx, snd_panel.y + 390)))
+
         # ── Bottom hints ────────────────────────────────────────
-        hints = [
-            "[</>] Cycle   [TAB] Switch   [ENTER] Race!   [Q] Back"
-        ]
-        for i, h in enumerate(hints):
-            t = font_key.render(h, True, COL_HUD_DIM)
-            screen.blit(t, t.get_rect(center=(WIDTH // 2, HEIGHT - 50 + i * 20)))
+        hints = font_key.render(
+            "[</>] Cycle   [TAB] Switch   [ENTER] Race!   [Q] Back",
+            True, COL_HUD_DIM)
+        screen.blit(hints, hints.get_rect(center=(WIDTH // 2, HEIGHT - 40)))
 
         pygame.display.flip()
         clock.tick(FPS)
