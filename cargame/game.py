@@ -91,6 +91,9 @@ class Game:
         spd = self._speed
         self.scroll += spd
 
+        # Update scene mood based on level
+        self.renderer.update_scene(self.level)
+
         # Smooth lane transition
         diff = self.player_target_x - self.player_x
         self.player_x += diff * 0.2
@@ -180,11 +183,17 @@ class Game:
         return None
 
     def _draw(self):
+        dt = self.clock.get_time() / 1000.0
+
         # Background, road, scenery
         self.renderer.draw_background()
+        self.renderer.draw_sun_moon()
+        self.renderer.draw_mountains(self.level)
         self.renderer.draw_road_grime(self.scroll)
         self.renderer.draw_lane_markings(self.scroll)
         self.renderer.draw_trees(self.scroll)
+        self.renderer.draw_river(self.scroll, self.level)
+        self.renderer.draw_birds(dt)
         self.renderer.draw_road_particles(self.scroll, self.level)
 
         # Enemy cars
@@ -193,6 +202,9 @@ class Game:
 
         # Speed lines behind player
         self.renderer.draw_speed_lines(self.player_x, self.player_y, self.level)
+
+        # Headlights at night
+        self.renderer.draw_headlights(self.player_x, self.player_y)
 
         # Player car (with invincibility glow)
         if self.is_invincible:
@@ -266,8 +278,11 @@ class Game:
 
     def _draw_static_scene(self):
         self.renderer.draw_background()
+        self.renderer.draw_sun_moon()
+        self.renderer.draw_mountains(self.level)
         self.renderer.draw_lane_markings(self.scroll)
         self.renderer.draw_trees(self.scroll)
+        self.renderer.draw_river(self.scroll, self.level)
         for e in self.enemies:
             self.renderer.draw_car(e.surface, e.x, e.y)
         self.renderer.draw_car(self.player_surface, self.player_x, self.player_y)

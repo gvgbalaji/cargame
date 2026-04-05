@@ -1,5 +1,6 @@
 """Rich HUD overlay — speedometer, progress, score, popups, confetti, booster."""
 
+import json
 import math
 import os
 import random
@@ -10,10 +11,20 @@ from .constants import (
     WIDTH, HEIGHT,
     COL_HUD_BG, COL_HUD_BORDER, COL_HUD_TEXT, COL_HUD_ACCENT,
     COL_HUD_WARN, COL_HUD_GOOD, COL_HUD_GOLD, COL_HUD_DIM,
-    LEVEL_TIPS,
 )
 
 _ASSET_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets")
+
+def _load_f1_facts() -> list[str]:
+    path = os.path.join(_ASSET_DIR, "facts", "f1_facts.json")
+    try:
+        with open(path, "r") as f:
+            data = json.load(f)
+        return [item["text"] for item in data]
+    except Exception:
+        return ["Trust the RNG", "Speed is life", "No brakes club"]
+
+_F1_FACTS = _load_f1_facts()
 
 # ── Confetti colors ─────────────────────────────────────────────
 _CONFETTI_COLORS = [
@@ -81,6 +92,11 @@ class HUD:
         self._booster_img: pygame.Surface | None = None
         self._load_booster()
 
+        # F1 facts — pick a random one per level, track with scrolling
+        self._fact_level = -1
+        self._fact_text = ""
+        self._fact_scroll_x = 0.0
+
     def _load_booster(self):
         path = os.path.join(_ASSET_DIR, "booster.png")
         try:
@@ -137,16 +153,33 @@ class HUD:
         next_text = self.font_tiny.render(f"{5-cars_to_next}/5 next", True, COL_HUD_DIM)
         screen.blit(next_text, (bar_x + 5, bar_y - 14))
 
-        # Right panel — Tip
-        tip_idx = min(level - 1, len(LEVEL_TIPS) - 1)
-        tip = LEVEL_TIPS[tip_idx]
-        rx = WIDTH - 195
-        self._draw_panel(screen, pygame.Rect(rx, 10, 180, 60))
-        tip_label = self.font_small.render("STATUS", True, COL_HUD_DIM)
+        # Right panel — F1 Fact (scrolling marquee for long text)
+        if level != self._fact_level:
+            self._fact_level = level
+            self._fact_text = random.choice(_F1_FACTS)
+            self._fact_scroll_x = 0.0
+
+        panel_w = 260
+        rx = WIDTH - panel_w - 15
+        self._draw_panel(screen, pygame.Rect(rx, 10, panel_w, 60))
+        fact_label = self.font_small.render("F1 FACT", True, COL_HUD_DIM)
+        screen.blit(fact_label, (rx + 10, 14))
+
         tip_color = COL_HUD_WARN if level > 8 else COL_HUD_GOOD
-        tip_val   = self.font_med.render(tip, True, tip_color)
-        screen.blit(tip_label, (rx + 10, 14))
-        screen.blit(tip_val, (rx + 10, 36))
+        fact_surf = self.font_small.render(self._fact_text, True, tip_color)
+        text_area_w = panel_w - 20
+        # If text fits, draw centered; otherwise scroll
+        if fact_surf.get_width() <= text_area_w:
+            screen.blit(fact_surf, (rx + 10, 36))
+        else:
+            self._fact_scroll_x += 0.8
+            total = fact_surf.get_width() + 60  # gap before repeat
+            sx = int(self._fact_scroll_x) % total
+            clip = pygame.Rect(rx + 10, 36, text_area_w, 20)
+            screen.set_clip(clip)
+            screen.blit(fact_surf, (rx + 10 - sx, 36))
+            screen.blit(fact_surf, (rx + 10 - sx + total, 36))
+            screen.set_clip(None)
 
     # ── speedometer ─────────────────────────────────────────────
 
@@ -312,22 +345,47 @@ class HUD:
                     time_text.get_rect(center=(bx + 60, by + 160)))
 
     def draw_power_indicator(self, screen: pygame.Surface, powers: int):
-        """Show available boost power count near the bottom-left."""
+        """Show available boost icons stacked on the right side of screen."""
         if powers <= 0:
             return
-        # Small booster icon + count
-        bx = 15
-        by = HEIGHT - 90
+        if self._booster_img is None:
+            return
 
-        self._draw_panel(screen, pygame.Rect(bx, by, 130, 35), alpha=160,
-                         border_color=(180, 80, 255))
+        # Stack booster icons vertically on the right, below the top bar
+        icon_w, icon_h = 48, 41
+        mini = pygame.transform.smoothscale(self._booster_img, (icon_w, icon_h))
+        bx = WIDTH - icon_w - 18
+        start_y = 85
+        ticks = pygame.time.get_ticks()
 
-        if self._booster_img:
-            mini = pygame.transform.smoothscale(self._booster_img, (28, 24))
-            screen.blit(mini, (bx + 8, by + 5))
+        # Panel behind all icons
+        max_show = min(powers, 5)
+        panel_h = max_show * (icon_h + 6) + 28
+        self._draw_panel(screen, pygame.Rect(bx - 10, start_y - 8, icon_w + 20, panel_h),
+                         alpha=150, border_color=(180, 80, 255))
 
-        txt = self.font_med.render(f"BOOST x{powers}", True, (200, 140, 255))
-        screen.blit(txt, (bx + 40, by + 7))
+        label = self.font_tiny.render("BOOST", True, (200, 140, 255))
+        screen.blit(label, label.get_rect(center=(bx + icon_w // 2, start_y + 2)))
+
+        for i in range(max_show):
+            iy = start_y + 16 + i * (icon_h + 6)
+            # Gentle pulse on the top icon
+            if i == 0:
+                pulse = abs(math.sin(ticks * 0.004)) * 0.15
+                scaled_w = int(icon_w * (1 + pulse))
+                scaled_h = int(icon_h * (1 + pulse))
+                pulsed = pygame.transform.smoothscale(self._booster_img,
+                                                       (scaled_w, scaled_h))
+                screen.blit(pulsed, (bx + (icon_w - scaled_w) // 2,
+                                     iy + (icon_h - scaled_h) // 2))
+            else:
+                screen.blit(mini, (bx, iy))
+
+        # Show count if more than 5
+        if powers > 5:
+            extra = self.font_tiny.render(f"+{powers - 5}", True, (200, 140, 255))
+            screen.blit(extra, extra.get_rect(
+                center=(bx + icon_w // 2, start_y + 16 + max_show * (icon_h + 6))))
 
     # ── game over overlay ───────────────────────────────────────
 
