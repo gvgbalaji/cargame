@@ -92,10 +92,8 @@ class HUD:
         self._booster_img: pygame.Surface | None = None
         self._load_booster()
 
-        # F1 facts — pick a random one per level, track with scrolling
-        self._fact_level = -1
-        self._fact_text = ""
-        self._fact_scroll_x = 0.0
+        # F1 fact — one random fact per game session
+        self._fact_text = random.choice(_F1_FACTS)
 
     def _load_booster(self):
         path = os.path.join(_ASSET_DIR, "booster.png")
@@ -106,6 +104,10 @@ class HUD:
             self._booster_img = None
 
     # ── helper ──────────────────────────────────────────────────
+
+    def new_fact(self):
+        """Pick a new random F1 fact (call on game reset)."""
+        self._fact_text = random.choice(_F1_FACTS)
 
     @staticmethod
     def _draw_panel(screen: pygame.Surface, rect: pygame.Rect,
@@ -153,33 +155,32 @@ class HUD:
         next_text = self.font_tiny.render(f"{5-cars_to_next}/5 next", True, COL_HUD_DIM)
         screen.blit(next_text, (bar_x + 5, bar_y - 14))
 
-        # Right panel — F1 Fact (scrolling marquee for long text)
-        if level != self._fact_level:
-            self._fact_level = level
-            self._fact_text = random.choice(_F1_FACTS)
-            self._fact_scroll_x = 0.0
-
-        panel_w = 260
+        # Right panel — F1 Fact (static, word-wrapped)
+        panel_w = 300
+        panel_h = 60
         rx = WIDTH - panel_w - 15
-        self._draw_panel(screen, pygame.Rect(rx, 10, panel_w, 60))
+        self._draw_panel(screen, pygame.Rect(rx, 10, panel_w, panel_h))
         fact_label = self.font_small.render("F1 FACT", True, COL_HUD_DIM)
-        screen.blit(fact_label, (rx + 10, 14))
+        screen.blit(fact_label, (rx + 10, 12))
 
         tip_color = COL_HUD_WARN if level > 8 else COL_HUD_GOOD
-        fact_surf = self.font_small.render(self._fact_text, True, tip_color)
-        text_area_w = panel_w - 20
-        # If text fits, draw centered; otherwise scroll
-        if fact_surf.get_width() <= text_area_w:
-            screen.blit(fact_surf, (rx + 10, 36))
-        else:
-            self._fact_scroll_x += 0.8
-            total = fact_surf.get_width() + 60  # gap before repeat
-            sx = int(self._fact_scroll_x) % total
-            clip = pygame.Rect(rx + 10, 36, text_area_w, 20)
-            screen.set_clip(clip)
-            screen.blit(fact_surf, (rx + 10 - sx, 36))
-            screen.blit(fact_surf, (rx + 10 - sx + total, 36))
-            screen.set_clip(None)
+        # Word-wrap into the panel
+        words = self._fact_text.split()
+        lines: list[str] = []
+        line = ""
+        for w in words:
+            test = f"{line} {w}".strip()
+            if self.font_tiny.size(test)[0] <= panel_w - 20:
+                line = test
+            else:
+                if line:
+                    lines.append(line)
+                line = w
+        if line:
+            lines.append(line)
+        for i, ln in enumerate(lines[:3]):
+            txt = self.font_tiny.render(ln, True, tip_color)
+            screen.blit(txt, (rx + 10, 28 + i * 13))
 
     # ── speedometer ─────────────────────────────────────────────
 

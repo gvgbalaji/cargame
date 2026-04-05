@@ -5,6 +5,7 @@ import pygame
 
 from .constants import (
     WIDTH, HEIGHT, FPS, CAR_W, CAR_H, NUM_LANES,
+    ROAD_LEFT, ROAD_RIGHT,
     lane_car_x,
 )
 from .cars import make_player_surface, PLAYER_STYLES
@@ -20,12 +21,14 @@ class Game:
     BASE_SPEED   = 3.0    # pixels per frame at level 1
     SPEED_STEP   = 0.8    # extra px/frame per level
     INVINCIBLE_DURATION = 3.0   # seconds
+    CURVY_MOVE_SPEED = 5  # px per frame when arrow held in curvy mode
 
     def __init__(self, screen: pygame.Surface, skin_index: int = 0,
-                 sound_theme: str = "engine"):
+                 sound_theme: str = "engine", curvy: bool = False):
         self.screen     = screen
         self.clock      = pygame.time.Clock()
-        self.renderer   = Renderer(screen)
+        self.curvy      = curvy
+        self.renderer   = Renderer(screen, curvy=curvy)
         self.hud        = HUD()
         self.best_score = 0
 
@@ -58,8 +61,9 @@ class Game:
         self.invincible_timer   = 0.0 # seconds remaining
         self._last_power_score  = 0   # track when last power was earned
 
-        # Confetti
+        # Confetti & new fact
         self.hud.confetti.clear()
+        self.hud.new_fact()
 
     # ── derived properties ──────────────────────────────────────
 
@@ -160,26 +164,40 @@ class Game:
             if event.type == pygame.QUIT:
                 return "quit"
             if event.type == pygame.KEYDOWN:
-                if event.key in (pygame.K_LEFT, pygame.K_a):
-                    new = max(0, self.player_lane - 1)
-                    if new != self.player_lane:
-                        self.player_lane = new
-                        self.player_target_x = lane_car_x(self.player_lane)
-                        play_lane_switch_sound()
-                elif event.key in (pygame.K_RIGHT, pygame.K_d):
-                    new = min(NUM_LANES - 1, self.player_lane + 1)
-                    if new != self.player_lane:
-                        self.player_lane = new
-                        self.player_target_x = lane_car_x(self.player_lane)
-                        play_lane_switch_sound()
-                elif event.key == pygame.K_UP:
-                    # Activate boost
+                if not self.curvy:
+                    # Straight mode: discrete lane switching
+                    if event.key in (pygame.K_LEFT, pygame.K_a):
+                        new = max(0, self.player_lane - 1)
+                        if new != self.player_lane:
+                            self.player_lane = new
+                            self.player_target_x = lane_car_x(self.player_lane)
+                            play_lane_switch_sound()
+                    elif event.key in (pygame.K_RIGHT, pygame.K_d):
+                        new = min(NUM_LANES - 1, self.player_lane + 1)
+                        if new != self.player_lane:
+                            self.player_lane = new
+                            self.player_target_x = lane_car_x(self.player_lane)
+                            play_lane_switch_sound()
+                if event.key == pygame.K_UP:
                     if self.boost_powers > 0 and not self.is_invincible:
                         self.boost_powers -= 1
                         self.invincible_timer = self.INVINCIBLE_DURATION
                         self.hud.spawn_confetti(40)
                 elif event.key == pygame.K_q:
                     return "quit"
+
+        # Curvy mode: continuous movement while keys held
+        if self.curvy:
+            keys = pygame.key.get_pressed()
+            if keys[pygame.K_LEFT] or keys[pygame.K_a]:
+                self.player_target_x -= self.CURVY_MOVE_SPEED
+            if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
+                self.player_target_x += self.CURVY_MOVE_SPEED
+            # Clamp within road bounds
+            min_x = ROAD_LEFT + 5
+            max_x = ROAD_RIGHT - CAR_W - 5
+            self.player_target_x = max(min_x, min(max_x, self.player_target_x))
+
         return None
 
     def _draw(self):
@@ -187,36 +205,39 @@ class Game:
 
         # Background, road, scenery
         self.renderer.draw_background()
-        self.renderer.draw_sun_moon()
         self.renderer.draw_mountains(self.level)
+        self.renderer.draw_road(self.scroll)
         self.renderer.draw_road_grime(self.scroll)
         self.renderer.draw_lane_markings(self.scroll)
         self.renderer.draw_trees(self.scroll)
+        self.renderer.draw_sun_moon()
         self.renderer.draw_river(self.scroll, self.level)
         self.renderer.draw_birds(dt)
         self.renderer.draw_road_particles(self.scroll, self.level)
 
         # Enemy cars
         for e in self.enemies:
-            self.renderer.draw_car(e.surface, e.x, e.y)
+            self.renderer.draw_car(e.surface, e.x, e.y, self.scroll)
 
         # Speed lines behind player
-        self.renderer.draw_speed_lines(self.player_x, self.player_y, self.level)
+        self.renderer.draw_speed_lines(self.player_x, self.player_y,
+                                       self.level, self.scroll)
 
-        # Headlights at night
-        self.renderer.draw_headlights(self.player_x, self.player_y)
+        # Headlights at night (shifted by curve)
+        pcx = self.renderer.road_curve(self.player_y + CAR_H / 2, self.scroll)
+        self.renderer.draw_headlights(self.player_x + pcx, self.player_y)
 
         # Player car (with invincibility glow)
         if self.is_invincible:
-            # Draw a pulsing glow around the player
             pulse = abs(pygame.time.get_ticks() % 500 - 250) / 250.0
             glow_alpha = int(60 + pulse * 80)
             glow = pygame.Surface((CAR_W + 20, CAR_H + 20), pygame.SRCALPHA)
             glow.fill((180, 80, 255, glow_alpha))
-            self.screen.blit(glow, (int(self.player_x) - 10,
+            self.screen.blit(glow, (int(self.player_x + pcx) - 10,
                                      int(self.player_y) - 10))
 
-        self.renderer.draw_car(self.player_surface, self.player_x, self.player_y)
+        self.renderer.draw_car(self.player_surface, self.player_x,
+                               self.player_y, self.scroll)
 
         # HUD
         cars_to_next = 5 - (self.score % 5)
@@ -278,14 +299,16 @@ class Game:
 
     def _draw_static_scene(self):
         self.renderer.draw_background()
-        self.renderer.draw_sun_moon()
         self.renderer.draw_mountains(self.level)
+        self.renderer.draw_road(self.scroll)
         self.renderer.draw_lane_markings(self.scroll)
         self.renderer.draw_trees(self.scroll)
+        self.renderer.draw_sun_moon()
         self.renderer.draw_river(self.scroll, self.level)
         for e in self.enemies:
-            self.renderer.draw_car(e.surface, e.x, e.y)
-        self.renderer.draw_car(self.player_surface, self.player_x, self.player_y)
+            self.renderer.draw_car(e.surface, e.x, e.y, self.scroll)
+        self.renderer.draw_car(self.player_surface, self.player_x,
+                               self.player_y, self.scroll)
 
     # ── public API ──────────────────────────────────────────────
 

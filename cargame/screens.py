@@ -122,8 +122,15 @@ def splash(screen: pygame.Surface) -> bool:
         tick += 1
 
 
-def customization_screen(screen: pygame.Surface) -> tuple[int, str]:
-    """Car style and sound theme picker. Returns (style_index, sound_theme)."""
+_ROAD_MODES = [
+    ("STRAIGHT", "Classic straight lanes"),
+    ("CURVY",    "Racing curves — free steering"),
+]
+
+
+def customization_screen(screen: pygame.Surface) -> tuple[int, str, bool]:
+    """Car style, sound, and road type picker.
+    Returns (style_index, sound_theme, curvy)."""
     clock = pygame.time.Clock()
 
     font_title = pygame.font.SysFont("Arial", 36, bold=True)
@@ -133,9 +140,11 @@ def customization_screen(screen: pygame.Surface) -> tuple[int, str]:
 
     style_sel = 0
     sound_sel = 0
-    section   = 0  # 0 = car, 1 = sound
+    road_sel  = 0
+    section   = 0  # 0 = car, 1 = sound, 2 = road
     tick      = 0
     n_styles  = len(PLAYER_STYLES)
+    n_sections = 3
 
     # Pre-build car preview surfaces (scaled up for display)
     car_previews = []
@@ -145,24 +154,31 @@ def customization_screen(screen: pygame.Surface) -> tuple[int, str]:
     while True:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                return (0, "engine")
+                return (0, "engine", False)
             if event.type == pygame.KEYDOWN:
-                if event.key in (pygame.K_TAB, pygame.K_UP, pygame.K_DOWN):
-                    section = 1 - section
+                if event.key in (pygame.K_TAB, pygame.K_DOWN):
+                    section = (section + 1) % n_sections
+                elif event.key == pygame.K_UP:
+                    section = (section - 1) % n_sections
                 elif event.key in (pygame.K_LEFT, pygame.K_a):
                     if section == 0:
                         style_sel = (style_sel - 1) % n_styles
-                    else:
+                    elif section == 1:
                         sound_sel = (sound_sel - 1) % len(SOUND_THEMES)
+                    else:
+                        road_sel = (road_sel - 1) % len(_ROAD_MODES)
                 elif event.key in (pygame.K_RIGHT, pygame.K_d):
                     if section == 0:
                         style_sel = (style_sel + 1) % n_styles
-                    else:
+                    elif section == 1:
                         sound_sel = (sound_sel + 1) % len(SOUND_THEMES)
+                    else:
+                        road_sel = (road_sel + 1) % len(_ROAD_MODES)
                 elif event.key in (pygame.K_RETURN, pygame.K_SPACE):
-                    return (style_sel, SOUND_THEMES[sound_sel][1])
+                    return (style_sel, SOUND_THEMES[sound_sel][1],
+                            road_sel == 1)
                 elif event.key == pygame.K_q:
-                    return (0, "engine")
+                    return (0, "engine", False)
 
         _draw_bg(screen, tick)
 
@@ -174,7 +190,7 @@ def customization_screen(screen: pygame.Surface) -> tuple[int, str]:
         car_active = (section == 0)
         car_border = COL_HUD_ACCENT if car_active else COL_HUD_DIM
 
-        car_panel = pygame.Rect(WIDTH // 2 - 340, 90, 300, 410)
+        car_panel = pygame.Rect(WIDTH // 2 - 440, 90, 280, 410)
         panel_s = pygame.Surface((car_panel.w, car_panel.h), pygame.SRCALPHA)
         pygame.draw.rect(panel_s, (10, 10, 15, 180),
                          (0, 0, car_panel.w, car_panel.h), border_radius=12)
@@ -212,11 +228,11 @@ def customization_screen(screen: pygame.Surface) -> tuple[int, str]:
         screen.blit(counter, counter.get_rect(
             center=(car_panel.centerx, car_panel.y + 390)))
 
-        # ── Sound section (right) ───────────────────────────────
+        # ── Sound section (center) ─────────────────────────────
         snd_active = (section == 1)
         snd_border = COL_HUD_ACCENT if snd_active else COL_HUD_DIM
 
-        snd_panel = pygame.Rect(WIDTH // 2 + 40, 90, 300, 410)
+        snd_panel = pygame.Rect(WIDTH // 2 - 140, 90, 280, 410)
         panel_s2 = pygame.Surface((snd_panel.w, snd_panel.h), pygame.SRCALPHA)
         pygame.draw.rect(panel_s2, (10, 10, 15, 180),
                          (0, 0, snd_panel.w, snd_panel.h), border_radius=12)
@@ -267,9 +283,73 @@ def customization_screen(screen: pygame.Surface) -> tuple[int, str]:
         screen.blit(snd_counter, snd_counter.get_rect(
             center=(snd_panel.centerx, snd_panel.y + 390)))
 
+        # ── Road type section (right) ─────────────────────────
+        road_active = (section == 2)
+        road_border = COL_HUD_ACCENT if road_active else COL_HUD_DIM
+
+        road_panel = pygame.Rect(WIDTH // 2 + 160, 90, 280, 410)
+        panel_s3 = pygame.Surface((road_panel.w, road_panel.h), pygame.SRCALPHA)
+        pygame.draw.rect(panel_s3, (10, 10, 15, 180),
+                         (0, 0, road_panel.w, road_panel.h), border_radius=12)
+        pygame.draw.rect(panel_s3, road_border,
+                         (0, 0, road_panel.w, road_panel.h), width=2, border_radius=12)
+        screen.blit(panel_s3, road_panel.topleft)
+
+        # Header
+        rhdr = font_med.render("ROAD TYPE", True, road_border)
+        screen.blit(rhdr, rhdr.get_rect(center=(road_panel.centerx, road_panel.y + 25)))
+
+        # Road name with arrows
+        road_name = _ROAD_MODES[road_sel][0]
+        road_desc = _ROAD_MODES[road_sel][1]
+        rarr_color = COL_HUD_ACCENT if road_active else COL_HUD_DIM
+
+        ry = road_panel.y + 55
+        rla = font_med.render("\u25C0", True, rarr_color)
+        rra = font_med.render("\u25B6", True, rarr_color)
+        rn = font_med.render(road_name, True, COL_HUD_GOLD)
+
+        screen.blit(rla, (road_panel.x + 20, ry))
+        screen.blit(rn, rn.get_rect(center=(road_panel.centerx, ry + 10)))
+        screen.blit(rra, (road_panel.right - 40, ry))
+
+        # Description
+        rdesc_text = font_small.render(road_desc, True, COL_HUD_DIM)
+        screen.blit(rdesc_text, rdesc_text.get_rect(
+            center=(road_panel.centerx, ry + 45)))
+
+        # Road preview illustration
+        rpy = road_panel.y + 140
+        rpw, rph = 100, 220
+        rpx = road_panel.centerx - rpw // 2
+        preview_s = pygame.Surface((rpw, rph), pygame.SRCALPHA)
+        # Mini road
+        pygame.draw.rect(preview_s, COL_ASPHALT, (15, 0, 70, rph))
+        # Lane markings
+        for dy in range(0, rph, 20):
+            yy = (dy + tick) % rph
+            if road_sel == 0:
+                # Straight
+                pygame.draw.rect(preview_s, COL_LANE_MARK, (37, yy, 3, 12))
+                pygame.draw.rect(preview_s, COL_LANE_MARK, (60, yy, 3, 12))
+            else:
+                # Curvy
+                cx = int(math.sin((yy + tick * 2) * 0.04) * 12)
+                pygame.draw.rect(preview_s, COL_LANE_MARK,
+                                 (37 + cx, yy, 3, 12))
+                pygame.draw.rect(preview_s, COL_LANE_MARK,
+                                 (60 + cx, yy, 3, 12))
+        screen.blit(preview_s, (rpx, rpy))
+
+        # Counter
+        road_counter = font_small.render(
+            f"{road_sel + 1} / {len(_ROAD_MODES)}", True, COL_HUD_DIM)
+        screen.blit(road_counter, road_counter.get_rect(
+            center=(road_panel.centerx, road_panel.y + 390)))
+
         # ── Bottom hints ────────────────────────────────────────
         hints = font_key.render(
-            "[</>] Cycle   [TAB] Switch   [ENTER] Race!   [Q] Back",
+            "[</>] Cycle   [TAB/\u2191\u2193] Switch   [ENTER] Race!   [Q] Back",
             True, COL_HUD_DIM)
         screen.blit(hints, hints.get_rect(center=(WIDTH // 2, HEIGHT - 40)))
 

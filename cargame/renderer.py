@@ -1,6 +1,7 @@
 """All Pygame drawing lives here. No game logic."""
 
 import math
+import os
 import random
 
 import pygame
@@ -11,6 +12,8 @@ from .constants import (
     COL_ASPHALT, COL_ASPHALT_L, COL_SHOULDER, COL_LANE_MARK,
     COL_EDGE_MARK,
 )
+
+_ASSET_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets")
 
 # ── Scene moods ──────────────────────────────────────────────
 SCENE_DAY    = 0
@@ -70,10 +73,13 @@ class Renderer:
 
     MAX_BIRDS = 8
 
-    def __init__(self, screen: pygame.Surface):
+    CURVE_AMP = 55  # max horizontal shift in pixels (sum of wave amplitudes)
+
+    def __init__(self, screen: pygame.Surface, curvy: bool = False):
         self.screen = screen
         self.w = WIDTH
         self.h = HEIGHT
+        self.curvy = curvy
         self._scene = SCENE_DAY
         self._build_background()
         self._build_tree_surface()
@@ -82,6 +88,20 @@ class Renderer:
         self._gen_stars()
         self._birds: list[_Bird] = []
         self._bird_timer = 0.0
+        self._headlight_img: pygame.Surface | None = None
+        self._load_headlights()
+
+    def _load_headlights(self):
+        path = os.path.join(_ASSET_DIR, "headlights.png")
+        try:
+            raw = pygame.image.load(path).convert_alpha()
+            from .constants import CAR_W
+            # Scale to match car width, keep aspect ratio
+            scale_w = int(CAR_W * 1.4)
+            scale_h = int(raw.get_height() * scale_w / raw.get_width())
+            self._headlight_img = pygame.transform.smoothscale(raw, (scale_w, scale_h))
+        except Exception:
+            self._headlight_img = None
 
     def update_scene(self, level: int):
         new = _scene_for_level(level)
@@ -91,17 +111,29 @@ class Renderer:
             self._build_tree_surface()
             self._build_mountain_surface()
 
+    def road_curve(self, y: float, scroll: float) -> float:
+        """Horizontal offset of the road at screen-row y."""
+        if not self.curvy:
+            return 0.0
+        # Multiple sine waves with irrational ratios → non-repeating organic curves
+        v = y + scroll
+        return (math.sin(v * 0.0037) * 25
+              + math.sin(v * 0.0018) * 18
+              + math.sin(v * 0.0064) * 12)
+
     # ── pre-rendered assets ─────────────────────────────────────
 
     def _pal(self):
         return _SCENE_COLORS[self._scene]
 
     def _build_background(self):
-        """Pre-render the static background (sky + grass)."""
+        """Pre-render sky gradient + full grass. Road drawn per-frame for curves."""
         pal = self._pal()
         self.bg = pygame.Surface((self.w, self.h))
         sky_top, sky_bot = pal["sky_top"], pal["sky_bot"]
+        grass, grass_dk, grass_lt = pal["grass"], pal["grass_dk"], pal["grass_lt"]
 
+        # Sky gradient over full screen
         for y in range(self.h):
             t = y / self.h
             r = int(sky_top[0] + (sky_bot[0] - sky_top[0]) * t)
@@ -109,20 +141,27 @@ class Renderer:
             b = int(sky_top[2] + (sky_bot[2] - sky_top[2]) * t)
             pygame.draw.line(self.bg, (r, g, b), (0, y), (self.w, y))
 
-        grass, grass_dk, grass_lt = pal["grass"], pal["grass_dk"], pal["grass_lt"]
-        pygame.draw.rect(self.bg, grass, (0, 0, ROAD_LEFT - 8, self.h))
-        pygame.draw.rect(self.bg, grass, (ROAD_RIGHT + 8, 0, self.w - ROAD_RIGHT - 8, self.h))
+        # Grass covers the full width — curved road will be painted on top each frame
+        pygame.draw.rect(self.bg, grass, (0, 0, self.w, self.h))
 
+        # Re-draw sky gradient only in the far margins where grass never appears
+        for y in range(self.h):
+            t = y / self.h
+            r = int(sky_top[0] + (sky_bot[0] - sky_top[0]) * t)
+            g = int(sky_top[1] + (sky_bot[1] - sky_top[1]) * t)
+            b = int(sky_top[2] + (sky_bot[2] - sky_top[2]) * t)
+            pygame.draw.line(self.bg, (r, g, b), (0, y), (self.w, y))
+
+        # Grass rectangles on both side bands
+        left_end = ROAD_LEFT - self.CURVE_AMP - 10
+        right_start = ROAD_RIGHT + self.CURVE_AMP + 10
+        pygame.draw.rect(self.bg, grass, (0, 0, left_end, self.h))
+        pygame.draw.rect(self.bg, grass, (right_start, 0, self.w - right_start, self.h))
+        # Grass stripe texture
         for y in range(0, self.h, 12):
             c = grass_dk if (y // 12) % 2 == 0 else grass_lt
-            pygame.draw.line(self.bg, c, (0, y), (ROAD_LEFT - 8, y), 2)
-            pygame.draw.line(self.bg, c, (ROAD_RIGHT + 8, y), (self.w, y), 2)
-
-        pygame.draw.rect(self.bg, COL_ASPHALT, (ROAD_LEFT - 8, 0, ROAD_WIDTH + 16, self.h))
-        pygame.draw.rect(self.bg, COL_SHOULDER, (ROAD_LEFT - 8, 0, 8, self.h))
-        pygame.draw.rect(self.bg, COL_SHOULDER, (ROAD_RIGHT, 0, 8, self.h))
-        pygame.draw.rect(self.bg, COL_EDGE_MARK, (ROAD_LEFT - 2, 0, 3, self.h))
-        pygame.draw.rect(self.bg, COL_EDGE_MARK, (ROAD_RIGHT - 1, 0, 3, self.h))
+            pygame.draw.line(self.bg, c, (0, y), (left_end, y), 2)
+            pygame.draw.line(self.bg, c, (right_start, y), (self.w, y), 2)
 
     def _build_tree_surface(self):
         """Pre-render a tree sprite matching the current scene palette."""
@@ -168,6 +207,34 @@ class Renderer:
 
     def draw_background(self):
         self.screen.blit(self.bg, (0, 0))
+
+    def draw_road(self, scroll: float):
+        """Draw the curved road surface, shoulders, and edge lines."""
+        pal = self._pal()
+        grass = pal["grass"]
+        grass_dk, grass_lt = pal["grass_dk"], pal["grass_lt"]
+        left_end = ROAD_LEFT - self.CURVE_AMP - 10
+        right_start = ROAD_RIGHT + self.CURVE_AMP + 10
+
+        # Pre-compute curve offsets and draw 2-pixel-tall strips
+        for y in range(0, self.h, 2):
+            cx = self.road_curve(y, scroll)
+            il = int(ROAD_LEFT + cx)
+            ir = int(ROAD_RIGHT + cx)
+
+            # Grass fill in the curve gap
+            gc = grass_dk if (y // 12) % 2 == 0 else grass_lt
+            pygame.draw.line(self.screen, gc, (left_end, y), (il - 8, y), 2)
+            pygame.draw.line(self.screen, gc, (ir + 8, y), (right_start, y), 2)
+
+            # Road surface
+            pygame.draw.line(self.screen, COL_ASPHALT, (il - 8, y), (ir + 8, y), 2)
+            # Shoulders
+            pygame.draw.line(self.screen, COL_SHOULDER, (il - 8, y), (il, y), 2)
+            pygame.draw.line(self.screen, COL_SHOULDER, (ir, y), (ir + 8, y), 2)
+            # Edge lines (2px wide)
+            pygame.draw.line(self.screen, COL_EDGE_MARK, (il - 1, y), (il + 1, y), 2)
+            pygame.draw.line(self.screen, COL_EDGE_MARK, (ir - 1, y), (ir + 1, y), 2)
 
     def draw_sun_moon(self):
         """Draw sun (day/sunset) or moon + stars (night)."""
@@ -342,49 +409,39 @@ class Renderer:
         self.screen.blit(river_area, (ROAD_RIGHT, 0))
 
     def draw_headlights(self, player_x: float, player_y: float):
-        """Draw headlight beams in front of the player car at night."""
+        """Overlay headlight image in front of the player car at night."""
         if self._scene != SCENE_NIGHT:
             return
+        if self._headlight_img is None:
+            return
 
-        from .constants import CAR_W, CAR_H
-        ticks = pygame.time.get_ticks()
-        flicker = 0.92 + 0.08 * math.sin(ticks * 0.01)
-
-        # Two headlight beams (left and right of car)
-        for offset in (CAR_W * 0.25, CAR_W * 0.75):
-            bx = int(player_x + offset)
-            by = int(player_y)
-
-            beam = pygame.Surface((80, 200), pygame.SRCALPHA)
-            # Cone of light tapering upward (car drives "up")
-            for i in range(200):
-                t = i / 200.0
-                width = int(6 + t * 30)
-                alpha = int((60 - t * 55) * flicker)
-                if alpha > 0:
-                    cx = 40
-                    pygame.draw.line(beam, (255, 250, 200, alpha),
-                                     (cx - width, i), (cx + width, i), 1)
-
-            # Place beam above (in front of) car
-            self.screen.blit(beam, (bx - 40, by - 190))
+        from .constants import CAR_W
+        img = self._headlight_img
+        # Center horizontally on the car, place above (in front of) the car
+        hx = int(player_x + CAR_W / 2 - img.get_width() / 2)
+        hy = int(player_y - img.get_height() + 20)
+        self.screen.blit(img, (hx, hy))
 
     def draw_lane_markings(self, scroll: float):
-        """Draw dashed lane dividers that scroll."""
+        """Draw dashed lane dividers that follow the road curve."""
         dash_len = 40
         gap_len = 30
         cycle = dash_len + gap_len
         offset = scroll % cycle
 
         for lane in range(1, NUM_LANES):
-            x = ROAD_LEFT + lane * LANE_WIDTH
+            base_x = ROAD_LEFT + lane * LANE_WIDTH
             y = -offset
             while y < self.h:
                 if y + dash_len > 0:
                     top = max(0, int(y))
                     bot = min(self.h, int(y + dash_len))
-                    pygame.draw.rect(self.screen, COL_LANE_MARK,
-                                     (x - 2, top, 4, bot - top))
+                    # Draw dash as series of points following the curve
+                    for dy in range(top, bot, 2):
+                        cx = self.road_curve(dy, scroll)
+                        px = int(base_x + cx)
+                        pygame.draw.line(self.screen, COL_LANE_MARK,
+                                         (px - 1, dy), (px + 1, dy), 2)
                 y += cycle
 
     def draw_road_grime(self, scroll: float):
@@ -393,8 +450,10 @@ class Renderer:
         for i in range(20):
             rx = rng.randint(ROAD_LEFT + 5, ROAD_RIGHT - 5)
             ry = (rng.randint(0, self.h) + int(scroll * 0.3)) % self.h
+            cx = self.road_curve(ry, scroll)
             pygame.draw.line(self.screen, COL_ASPHALT_L,
-                             (rx, ry), (rx + rng.randint(-5, 5), ry + rng.randint(2, 8)), 1)
+                             (int(rx + cx), ry),
+                             (int(rx + cx + rng.randint(-5, 5)), ry + rng.randint(2, 8)), 1)
 
     def draw_trees(self, scroll: float):
         """Draw scrolling trees on both sides of the road."""
@@ -410,11 +469,14 @@ class Renderer:
             self.screen.blit(self.tree_surf, (ROAD_RIGHT + 30, int(y) + 30))
             self.screen.blit(self.tree_surf, (ROAD_RIGHT + 90, int(y)))
 
-    def draw_car(self, surf: pygame.Surface, x: float, y: float):
-        """Draw a car surface at the given position."""
-        self.screen.blit(surf, (int(x), int(y)))
+    def draw_car(self, surf: pygame.Surface, x: float, y: float,
+                 scroll: float = 0.0):
+        """Draw a car surface at the given position, shifted by road curve."""
+        cx = self.road_curve(y + surf.get_height() / 2, scroll)
+        self.screen.blit(surf, (int(x + cx), int(y)))
 
-    def draw_speed_lines(self, player_x: float, player_y: float, level: int):
+    def draw_speed_lines(self, player_x: float, player_y: float,
+                         level: int, scroll: float = 0.0):
         """Draw motion blur / speed lines behind the player car."""
         if level < 2:
             return
@@ -423,8 +485,9 @@ class Renderer:
         rng = random.Random(int(pygame.time.get_ticks() / 50))
 
         from .constants import CAR_H as _CH
+        cx = self.road_curve(player_y + _CH, scroll)
         for _ in range(num_lines):
-            lx = player_x + rng.randint(5, 50)
+            lx = player_x + cx + rng.randint(5, 50)
             ly = player_y + _CH + rng.randint(5, 40)
             length = rng.randint(20, 50 + level * 5)
             alpha = rng.randint(min(40, intensity), max(40, intensity))
@@ -441,10 +504,11 @@ class Renderer:
         for _ in range(count):
             px = rng.randint(ROAD_LEFT + 5, ROAD_RIGHT - 5)
             py = rng.randint(0, self.h)
+            cx = self.road_curve(py, scroll)
             alpha = rng.randint(30, 120)
             dot = pygame.Surface((3, 3), pygame.SRCALPHA)
             dot.fill((255, 255, 255, alpha))
-            self.screen.blit(dot, (px, py))
+            self.screen.blit(dot, (int(px + cx), py))
 
     def draw_crash_flash(self):
         """Full-screen red flash overlay."""

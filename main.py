@@ -26,18 +26,19 @@ def main():
         pygame.quit()
         return
 
-    skin_index, sound_theme = customization_screen(screen)
-    game = Game(screen, skin_index, sound_theme)
+    skin_index, sound_theme, curvy = customization_screen(screen)
+    game = Game(screen, skin_index, sound_theme, curvy=curvy)
+    best_score = 0
 
     while True:
         result = game.play()
+        best_score = max(best_score, game.best_score)
         if result == "quit":
             break
         if result == "customize":
-            skin_index, sound_theme = customization_screen(screen)
-            game.set_skin(skin_index)
-            set_sound_config(enabled=(sound_theme != "silent"),
-                             theme=sound_theme)
+            skin_index, sound_theme, curvy = customization_screen(screen)
+            game = Game(screen, skin_index, sound_theme, curvy=curvy)
+            game.best_score = best_score
 
     pygame.quit()
     print("\nThanks for playing Car Dodge!  Drive safe.")
