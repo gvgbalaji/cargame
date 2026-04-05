@@ -16,6 +16,7 @@ from .hud import HUD
 from .sound import (play_crash_sound, play_lane_switch_sound, play_pass_sound,
                     set_sound_config, toggle_sound, is_sound_enabled,
                     play_background_music, stop_background_music)
+from .scores import init_db, save_score, get_top5
 
 
 class Game:
@@ -38,6 +39,7 @@ class Game:
 
         self._set_skin(skin_index)
         set_sound_config(enabled=(sound_theme != "silent"), theme=sound_theme)
+        init_db()
 
         # Pre-warm asset loading to prevent first-game lag
         _load_vehicles()
@@ -320,21 +322,19 @@ class Game:
                               by_draw + b.height // 2 - glow_r))
             self.screen.blit(b.surface, (bx_draw, by_draw))
 
-        # Player bullets — bright yellow laser beams going upward
+        # Player bullets — firepower lightning orbs flying upward
+        fp_bullet = self.hud._firepower_bullet
         for bl in self.bullets:
             cx = self.renderer.road_curve(bl.y, self.scroll)
             bx, by = int(bl.x + cx), int(bl.y)
-            # Glow halo
-            gw, gh = Bullet.W + 12, Bullet.H + 14
-            glow_s = pygame.Surface((gw, gh), pygame.SRCALPHA)
-            pygame.draw.ellipse(glow_s, (255, 200, 0, 70), (0, 0, gw, gh))
-            self.screen.blit(glow_s, (bx - 6, by - 7))
-            # Core beam
-            pygame.draw.rect(self.screen, (255, 255, 120),
-                             (bx, by, Bullet.W, Bullet.H), border_radius=4)
-            # Bright tip
-            pygame.draw.rect(self.screen, (255, 255, 255),
-                             (bx + 2, by, Bullet.W - 4, 6), border_radius=2)
+            if fp_bullet:
+                self.screen.blit(fp_bullet, (bx, by))
+            else:
+                # Fallback: electric blue beam
+                pygame.draw.rect(self.screen, (80, 160, 255),
+                                 (bx, by, Bullet.W, Bullet.H), border_radius=4)
+                pygame.draw.rect(self.screen, (200, 230, 255),
+                                 (bx + 2, by, Bullet.W - 4, 6), border_radius=2)
 
         # Speed lines behind player
         self.renderer.draw_speed_lines(self.player_x, self.player_y,
@@ -365,10 +365,12 @@ class Game:
         self.hud.draw_mute_icon(self.screen, is_sound_enabled())
         self.hud.draw_popups(self.screen)
 
-        # Boost power indicator (right side)
+        # Fire power indicator — right side column (firepower.png icons)
+        self.hud.draw_fire_indicator(self.screen, self.shoot_powers)
+        # Boost / invincible power indicator — right side, second column
         self.hud.draw_power_indicator(self.screen, self.boost_powers)
-        # Shoot power indicator (left side)
-        self.hud.draw_shoot_indicator(self.screen, self.shoot_powers)
+        # F1 fact — bottom right
+        self.hud.draw_f1_fact(self.screen, self.level)
 
         # Booster active display
         if self.is_invincible:
@@ -390,6 +392,7 @@ class Game:
         is_new_best = self.score > self.best_score
         if is_new_best:
             self.best_score = self.score
+        save_score(self.score, self.level)
         play_crash_sound()
 
         for _ in range(6):
@@ -414,7 +417,7 @@ class Game:
 
             self._draw_static_scene()
             self.hud.draw_game_over(self.screen, self.score, self.level,
-                                    self.best_score, is_new_best)
+                                    self.best_score, is_new_best, get_top5())
             pygame.display.flip()
             self.clock.tick(FPS)
 

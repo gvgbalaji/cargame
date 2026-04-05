@@ -95,19 +95,24 @@ class HUD:
         self._booster_img: pygame.Surface | None = None
         self._load_booster()
 
-        # Score medal and race flag images
-        self._medal_img: pygame.Surface | None = None
-        self._flag_img:  pygame.Surface | None = None
+        # Score medal, race flag, firepower images
+        self._medal_img:        pygame.Surface | None = None
+        self._flag_img:         pygame.Surface | None = None
+        self._firepower_icon:   pygame.Surface | None = None
+        self._firepower_bullet: pygame.Surface | None = None
         self._load_hud_images()
 
         # F1 fact — one random fact per game session
         self._fact_text = random.choice(_F1_FACTS)
 
     def _load_hud_images(self):
-        for attr, fname, size in [
-            ("_medal_img", "score.png", (72, 72)),
-            ("_flag_img",  "flag.png",  (62, 56)),
-        ]:
+        specs = [
+            ("_medal_img",       "score.png",     (72, 72)),
+            ("_flag_img",        "flag.png",       (62, 56)),
+            ("_firepower_icon",  "firepower.png",  (44, 44)),   # indicator stack
+            ("_firepower_bullet","firepower.png",  (32, 32)),   # in-flight bullet
+        ]
+        for attr, fname, size in specs:
             path = os.path.join(_ASSET_DIR, fname)
             try:
                 raw = pygame.image.load(path).convert_alpha()
@@ -143,81 +148,51 @@ class HUD:
 
     def draw_top_bar(self, screen: pygame.Surface, score: int, level: int,
                      best: int, cars_to_next: int):
-        # ── LEFT: F1 Fact panel ─────────────────────────────────
-        panel_w = 310
-        panel_h = 95
-        self._draw_panel(screen, pygame.Rect(15, 10, panel_w, panel_h))
-        fact_label = self.font_med.render("F1 FACT", True, COL_HUD_ACCENT)
-        screen.blit(fact_label, (25, 14))
-
-        tip_color = COL_HUD_WARN if level > 8 else COL_HUD_GOOD
-        words = self._fact_text.split()
-        lines: list[str] = []
-        line = ""
-        for w in words:
-            test = f"{line} {w}".strip()
-            if self.font_small.size(test)[0] <= panel_w - 22:
-                line = test
-            else:
-                if line:
-                    lines.append(line)
-                line = w
-        if line:
-            lines.append(line)
-        for i, ln in enumerate(lines[:4]):
-            txt = self.font_small.render(ln, True, tip_color)
-            screen.blit(txt, (25, 38 + i * 17))
-
-        # ── RIGHT: Score panel with medal image ─────────────────
-        sp_w, sp_h = 240, 95
+        # ── Score panel (right) with gold medal ─────────────────
+        sp_w, sp_h = 240, 90
         sx = WIDTH - sp_w - 255
-        self._draw_panel(screen, pygame.Rect(sx, 10, sp_w, sp_h),
+        self._draw_panel(screen, pygame.Rect(sx, 8, sp_w, sp_h),
                          border_color=COL_HUD_GOLD)
 
-        # Medal image
         if self._medal_img:
-            # Slightly overflow the top border for style
-            screen.blit(self._medal_img, (sx + 8, 4))
-            text_x = sx + 88
+            screen.blit(self._medal_img, (sx + 6, 3))
+            text_x = sx + 86
         else:
             text_x = sx + 12
 
-        score_lbl = self.font_small.render("SCORE", True, COL_HUD_DIM)
-        screen.blit(score_lbl, (text_x, 16))
-        score_val = self.font_large.render(f"{score:05d}", True, COL_HUD_TEXT)
-        screen.blit(score_val, (text_x, 34))
-        best_txt = self.font_tiny.render(f"BEST  {best:05d}", True, COL_HUD_GOLD)
-        screen.blit(best_txt, (text_x, 68))
+        screen.blit(self.font_small.render("SCORE", True, COL_HUD_DIM),
+                    (text_x, 14))
+        score_val = self.font_large.render(str(score), True, COL_HUD_TEXT)
+        screen.blit(score_val, (text_x, 32))
+        screen.blit(self.font_tiny.render(f"BEST  {best}", True, COL_HUD_GOLD),
+                    (text_x, 66))
 
-        # ── FAR RIGHT: Level panel with race flag image ──────────
-        lp_w, lp_h = 240, 95
+        # ── Level panel (far right) with checkered flag ──────────
+        lp_w, lp_h = 240, 90
         lx = WIDTH - lp_w - 10
-        self._draw_panel(screen, pygame.Rect(lx, 10, lp_w, lp_h),
+        self._draw_panel(screen, pygame.Rect(lx, 8, lp_w, lp_h),
                          border_color=(255, 80, 80))
 
-        # Flag image
         if self._flag_img:
-            screen.blit(self._flag_img, (lx + 8, 12))
-            lvl_text_x = lx + 80
+            screen.blit(self._flag_img, (lx + 6, 14))
+            lvl_text_x = lx + 78
         else:
             lvl_text_x = lx + 12
 
-        lvl_lbl = self.font_small.render("LEVEL", True, COL_HUD_DIM)
-        screen.blit(lvl_lbl, (lvl_text_x, 16))
-        lvl_val = self.font_large.render(f"{level:02d}", True, COL_HUD_GOLD)
-        screen.blit(lvl_val, (lvl_text_x, 34))
+        screen.blit(self.font_small.render("LEVEL", True, COL_HUD_DIM),
+                    (lvl_text_x, 14))
+        screen.blit(self.font_large.render(f"{level:02d}", True, COL_HUD_GOLD),
+                    (lvl_text_x, 32))
 
-        # Progress bar
         progress = (5 - cars_to_next) / 5.0
-        bar_x, bar_y, bar_w, bar_h = lvl_text_x, 68, lp_w - (lvl_text_x - lx) - 12, 12
-        pygame.draw.rect(screen, (30, 30, 40), (bar_x, bar_y, bar_w, bar_h),
-                         border_radius=6)
-        fill_w = int(bar_w * progress)
-        if fill_w > 0:
-            pygame.draw.rect(screen, COL_HUD_ACCENT,
-                             (bar_x, bar_y, fill_w, bar_h), border_radius=6)
-        next_txt = self.font_tiny.render(f"{5 - cars_to_next}/5", True, COL_HUD_DIM)
-        screen.blit(next_txt, (bar_x + bar_w + 4, bar_y - 1))
+        bx2 = lvl_text_x
+        bw2 = lp_w - (lvl_text_x - lx) - 12
+        pygame.draw.rect(screen, (30, 30, 40), (bx2, 67, bw2, 12), border_radius=6)
+        fw = int(bw2 * progress)
+        if fw > 0:
+            pygame.draw.rect(screen, COL_HUD_ACCENT, (bx2, 67, fw, 12), border_radius=6)
+        screen.blit(self.font_tiny.render(f"{5 - cars_to_next}/5", True, COL_HUD_DIM),
+                    (bx2 + bw2 + 4, 68))
 
     # ── speedometer ─────────────────────────────────────────────
 
@@ -424,153 +399,191 @@ class HUD:
                     time_text.get_rect(center=(bx + 60, by + 160)))
 
     def draw_power_indicator(self, screen: pygame.Surface, powers: int):
-        """Show available boost icons stacked on the right side of screen."""
-        if powers <= 0:
-            return
+        """Show boost icons in the second-from-right column."""
         if self._booster_img is None:
             return
 
-        # Stack booster icons vertically on the right, below the top bar
-        icon_w, icon_h = 48, 41
-        mini = pygame.transform.smoothscale(self._booster_img, (icon_w, icon_h))
-        bx = WIDTH - icon_w - 18
-        start_y = 115  # moved down to clear the taller F1 fact panel
+        icon_w, icon_h = 44, 38
+        # Boost lives in the column just LEFT of the fire column
+        bx = WIDTH - icon_w * 2 - 36
+        start_y = 108
         ticks = pygame.time.get_ticks()
 
-        # Panel behind all icons
-        max_show = min(powers, 5)
-        panel_h = max_show * (icon_h + 6) + 28
-        self._draw_panel(screen, pygame.Rect(bx - 10, start_y - 8, icon_w + 20, panel_h),
+        max_show = max(0, min(powers, 5))
+        # Always show panel (at least label) so player knows boost exists
+        panel_h = max(50, max_show * (icon_h + 5) + 26)
+        self._draw_panel(screen, pygame.Rect(bx - 8, start_y - 8, icon_w + 18, panel_h),
                          alpha=150, border_color=(180, 80, 255))
 
-        label = self.font_tiny.render("BOOST", True, (200, 140, 255))
-        screen.blit(label, label.get_rect(center=(bx + icon_w // 2, start_y + 2)))
+        lbl = self.font_tiny.render("BOOST", True, (200, 140, 255))
+        screen.blit(lbl, lbl.get_rect(center=(bx + icon_w // 2, start_y + 3)))
 
+        mini = pygame.transform.smoothscale(self._booster_img, (icon_w, icon_h))
         for i in range(max_show):
-            iy = start_y + 16 + i * (icon_h + 6)
-            # Gentle pulse on the top icon
+            iy = start_y + 18 + i * (icon_h + 5)
             if i == 0:
-                pulse = abs(math.sin(ticks * 0.004)) * 0.15
-                scaled_w = int(icon_w * (1 + pulse))
-                scaled_h = int(icon_h * (1 + pulse))
-                pulsed = pygame.transform.smoothscale(self._booster_img,
-                                                       (scaled_w, scaled_h))
-                screen.blit(pulsed, (bx + (icon_w - scaled_w) // 2,
-                                     iy + (icon_h - scaled_h) // 2))
+                pulse = abs(math.sin(ticks * 0.004)) * 0.13
+                sw = int(icon_w * (1 + pulse))
+                sh = int(icon_h * (1 + pulse))
+                pulsed = pygame.transform.smoothscale(self._booster_img, (sw, sh))
+                screen.blit(pulsed, (bx + (icon_w - sw) // 2, iy + (icon_h - sh) // 2))
             else:
                 screen.blit(mini, (bx, iy))
 
-        # Show count if more than 5
         if powers > 5:
-            extra = self.font_tiny.render(f"+{powers - 5}", True, (200, 140, 255))
+            extra = self.font_tiny.render(f"+{powers-5}", True, (200, 140, 255))
             screen.blit(extra, extra.get_rect(
-                center=(bx + icon_w // 2, start_y + 16 + max_show * (icon_h + 6))))
+                center=(bx + icon_w // 2, start_y + 18 + max_show * (icon_h + 5))))
 
-    def draw_shoot_indicator(self, screen: pygame.Surface, shots: int):
-        """Show available shooting powers stacked on the LEFT side."""
-        if shots <= 0:
-            return
-
-        icon_w, icon_h = 36, 36
-        bx = 15
-        start_y = 115
+    def draw_fire_indicator(self, screen: pygame.Surface, shots: int):
+        """Show fire power count on far-right column using firepower.png icons."""
+        icon_w, icon_h = 44, 44
+        bx = WIDTH - icon_w - 12       # far-right column
+        start_y = 108
         ticks = pygame.time.get_ticks()
-        max_show = min(shots, 5)
-        panel_h = max_show * (icon_h + 6) + 28
 
-        self._draw_panel(screen, pygame.Rect(bx - 2, start_y - 8,
-                                             icon_w + 16, panel_h),
-                         alpha=150, border_color=(255, 140, 40))
+        max_show = max(0, min(shots, 5))
+        panel_h = max(50, max_show * (icon_h + 5) + 26)
+        self._draw_panel(screen, pygame.Rect(bx - 8, start_y - 8, icon_w + 18, panel_h),
+                         alpha=150, border_color=(60, 140, 255))
 
-        label = self.font_tiny.render("FIRE", True, (255, 170, 60))
-        screen.blit(label, label.get_rect(
-            center=(bx + icon_w // 2 + 5, start_y + 4)))
+        lbl = self.font_tiny.render("FIRE", True, (100, 180, 255))
+        screen.blit(lbl, lbl.get_rect(center=(bx + icon_w // 2, start_y + 3)))
 
-        for i in range(max_show):
-            iy = start_y + 18 + i * (icon_h + 6)
-            ix = bx + 5
-
-            # Pulse on top icon
-            scale = 1.0
-            if i == 0:
-                scale = 1.0 + abs(math.sin(ticks * 0.004)) * 0.12
-
-            # Draw bullet shape: rectangle body + pointed tip
-            bw = int(icon_w * 0.35 * scale)
-            bh = int(icon_h * 0.85 * scale)
-            cx_b = ix + icon_w // 2 - bw // 2
-            # Casing (gold/brass)
-            pygame.draw.rect(screen, (200, 155, 30),
-                             (cx_b, iy + icon_h - bh, bw, int(bh * 0.6)),
-                             border_radius=2)
-            # Tip (copper/orange)
-            tip_pts = [
-                (cx_b, iy + icon_h - bh),
-                (cx_b + bw, iy + icon_h - bh),
-                (cx_b + bw // 2, iy + icon_h - bh - int(bh * 0.4)),
-            ]
-            pygame.draw.polygon(screen, (220, 100, 30), tip_pts)
+        if self._firepower_icon:
+            mini = self._firepower_icon
+            for i in range(max_show):
+                iy = start_y + 18 + i * (icon_h + 5)
+                if i == 0:
+                    pulse = abs(math.sin(ticks * 0.005)) * 0.14
+                    sw = int(icon_w * (1 + pulse))
+                    sh = int(icon_h * (1 + pulse))
+                    scaled = pygame.transform.smoothscale(self._firepower_icon, (sw, sh))
+                    screen.blit(scaled, (bx + (icon_w - sw) // 2,
+                                         iy + (icon_h - sh) // 2))
+                else:
+                    screen.blit(mini, (bx, iy))
+        else:
+            # Fallback: draw electric circles
+            for i in range(max_show):
+                iy = start_y + 18 + i * (icon_h + 5)
+                pygame.draw.circle(screen, (60, 120, 255),
+                                   (bx + icon_w // 2, iy + icon_h // 2), icon_w // 2 - 2)
 
         if shots > 5:
-            extra = self.font_tiny.render(f"+{shots - 5}", True, (255, 140, 40))
+            extra = self.font_tiny.render(f"+{shots - 5}", True, (100, 180, 255))
             screen.blit(extra, extra.get_rect(
-                center=(bx + icon_w // 2 + 5,
-                        start_y + 18 + max_show * (icon_h + 6))))
+                center=(bx + icon_w // 2, start_y + 18 + max_show * (icon_h + 5))))
+
+    def draw_f1_fact(self, screen: pygame.Surface, level: int):
+        """F1 fact panel — bottom-right, beside the speedometer."""
+        panel_w, panel_h = 295, 115
+        px = WIDTH - 310 - 200   # to the left of speedometer
+        py = HEIGHT - panel_h - 48
+        self._draw_panel(screen, pygame.Rect(px, py, panel_w, panel_h))
+
+        screen.blit(self.font_med.render("F1 FACT", True, COL_HUD_ACCENT),
+                    (px + 10, py + 8))
+
+        tip_color = COL_HUD_WARN if level > 8 else COL_HUD_GOOD
+        words = self._fact_text.split()
+        lines: list[str] = []
+        cur = ""
+        for w in words:
+            test = f"{cur} {w}".strip()
+            if self.font_small.size(test)[0] <= panel_w - 20:
+                cur = test
+            else:
+                if cur:
+                    lines.append(cur)
+                cur = w
+        if cur:
+            lines.append(cur)
+        for i, ln in enumerate(lines[:4]):
+            screen.blit(self.font_small.render(ln, True, tip_color),
+                        (px + 10, py + 32 + i * 18))
 
     # ── game over overlay ───────────────────────────────────────
 
     def draw_game_over(self, screen: pygame.Surface, score: int, level: int,
-                       best: int, is_new_best: bool):
+                       best: int, is_new_best: bool,
+                       top5: list[tuple[int, int, str]] | None = None):
         overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 160))
+        overlay.fill((0, 0, 0, 170))
         screen.blit(overlay, (0, 0))
 
-        box_w, box_h = 400, 320
-        bx = WIDTH // 2 - box_w // 2
+        # ── Main game-over box ───────────────────────────────────
+        box_w, box_h = 400, 290
+        bx = WIDTH // 2 - box_w // 2 - 220
         by = HEIGHT // 2 - box_h // 2
 
         box = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
-        pygame.draw.rect(box, (15, 15, 25, 230), (0, 0, box_w, box_h),
-                         border_radius=15)
-        pygame.draw.rect(box, COL_HUD_WARN, (0, 0, box_w, box_h),
-                         width=3, border_radius=15)
+        pygame.draw.rect(box, (15, 15, 25, 230), (0, 0, box_w, box_h), border_radius=15)
+        pygame.draw.rect(box, COL_HUD_WARN, (0, 0, box_w, box_h), width=3, border_radius=15)
         screen.blit(box, (bx, by))
 
         title = self.font_large.render("GAME OVER", True, COL_HUD_WARN)
-        screen.blit(title, title.get_rect(center=(WIDTH // 2, by + 40)))
+        screen.blit(title, title.get_rect(center=(bx + box_w // 2, by + 38)))
 
         pygame.draw.line(screen, COL_HUD_DIM,
-                         (bx + 30, by + 65), (bx + box_w - 30, by + 65), 1)
+                         (bx + 30, by + 62), (bx + box_w - 30, by + 62), 1)
 
-        y_off = by + 85
-        stats = [
-            ("Score", f"{score:05d}", COL_HUD_TEXT),
-            ("Level", f"{level}", COL_HUD_GOLD),
-            ("Best", f"{best:05d}", COL_HUD_ACCENT),
-        ]
-        for label, value, color in stats:
+        y_off = by + 78
+        for label, value, color in [
+            ("Score", str(score),     COL_HUD_TEXT),
+            ("Level", str(level),     COL_HUD_GOLD),
+            ("Best",  str(best),      COL_HUD_ACCENT),
+        ]:
             lbl = self.font_med.render(label, True, COL_HUD_DIM)
             val = self.font_large.render(value, True, color)
-            screen.blit(lbl, (bx + 60, y_off))
-            screen.blit(val, (bx + box_w - 60 - val.get_width(), y_off - 4))
-            y_off += 45
+            screen.blit(lbl, (bx + 55, y_off))
+            screen.blit(val, (bx + box_w - 55 - val.get_width(), y_off - 4))
+            y_off += 44
 
         if is_new_best:
             nb = self.font_med.render("NEW BEST!", True, COL_HUD_GOLD)
-            screen.blit(nb, nb.get_rect(center=(WIDTH // 2, y_off + 5)))
-            y_off += 30
+            screen.blit(nb, nb.get_rect(center=(bx + box_w // 2, y_off + 4)))
+            y_off += 28
 
         pygame.draw.line(screen, COL_HUD_DIM,
-                         (bx + 30, y_off + 10), (bx + box_w - 30, y_off + 10), 1)
+                         (bx + 30, y_off + 8), (bx + box_w - 30, y_off + 8), 1)
 
-        btn_y = y_off + 25
-        btns = [
-            ("[R] Retry", COL_HUD_GOOD),
-            ("[C] Customize", COL_HUD_ACCENT),
-            ("[Q] Quit", COL_HUD_WARN),
-        ]
-        btn_x = bx + 40
-        for text, color in btns:
-            t = self.font_med.render(text, True, color)
-            screen.blit(t, (btn_x, btn_y))
-            btn_x += 130
+        btn_y = y_off + 20
+        btn_x = bx + 35
+        for text, color in [("[R] Retry", COL_HUD_GOOD),
+                             ("[C] Customize", COL_HUD_ACCENT),
+                             ("[Q] Quit", COL_HUD_WARN)]:
+            screen.blit(self.font_med.render(text, True, color), (btn_x, btn_y))
+            btn_x += 125
+
+        # ── Leaderboard box (right side) ─────────────────────────
+        lb_w, lb_h = 340, box_h
+        lbx = bx + box_w + 20
+        lby = by
+
+        lb = pygame.Surface((lb_w, lb_h), pygame.SRCALPHA)
+        pygame.draw.rect(lb, (10, 15, 30, 230), (0, 0, lb_w, lb_h), border_radius=15)
+        pygame.draw.rect(lb, COL_HUD_GOLD, (0, 0, lb_w, lb_h), width=2, border_radius=15)
+        screen.blit(lb, (lbx, lby))
+
+        screen.blit(
+            self.font_large.render("TOP  5", True, COL_HUD_GOLD),
+            self.font_large.render("TOP  5", True, COL_HUD_GOLD).get_rect(
+                center=(lbx + lb_w // 2, lby + 30)),
+        )
+        pygame.draw.line(screen, COL_HUD_DIM,
+                         (lbx + 20, lby + 52), (lbx + lb_w - 20, lby + 52), 1)
+
+        rows = top5 or []
+        for rank, (sc, lv, dt) in enumerate(rows, 1):
+            ry = lby + 60 + (rank - 1) * 44
+            medal_colors = [(255, 215, 0), (180, 180, 180), (200, 130, 60)]
+            rc = medal_colors[rank - 1] if rank <= 3 else COL_HUD_DIM
+            screen.blit(self.font_med.render(f"#{rank}", True, rc), (lbx + 18, ry))
+            screen.blit(self.font_med.render(str(sc), True, COL_HUD_TEXT), (lbx + 65, ry))
+            screen.blit(self.font_tiny.render(f"Lv{lv}", True, COL_HUD_GOLD), (lbx + 160, ry + 4))
+            screen.blit(self.font_tiny.render(dt, True, COL_HUD_DIM), (lbx + 210, ry + 4))
+
+        if not rows:
+            no_data = self.font_small.render("No scores yet!", True, COL_HUD_DIM)
+            screen.blit(no_data, no_data.get_rect(center=(lbx + lb_w // 2, lby + lb_h // 2)))

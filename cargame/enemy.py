@@ -148,7 +148,7 @@ class Tanker:
         self.height = self.surface.get_height()
         self.y      = float(-self.height)
 
-        self.fire_timer     = random.uniform(0.3, 0.8)   # fire quickly after entering screen
+        self.fire_timer     = 0.0                          # fire on first visible frame
         self.fire_interval  = random.uniform(1.2, 2.2)  # seconds between shots
         self.burst_remaining = 0      # extra shots in current burst
         self.burst_delay    = 0.0     # countdown for next burst shot
