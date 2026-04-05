@@ -19,6 +19,7 @@ class Game:
 
     BASE_SPEED   = 3.0    # pixels per frame at level 1
     SPEED_STEP   = 0.8    # extra px/frame per level
+    INVINCIBLE_DURATION = 3.0   # seconds
 
     def __init__(self, screen: pygame.Surface, skin_index: int = 0,
                  sound_theme: str = "engine"):
@@ -49,9 +50,16 @@ class Game:
         self.score          = 0
         self.level          = 1
         self.scroll         = 0.0
-        self.spawn_cd       = 60  # frames until first spawn
-        self.party_timer    = 0
+        self.spawn_cd       = 60
         self.crash_flash    = 0
+
+        # Invincibility / boost power
+        self.boost_powers       = 0   # available boosts
+        self.invincible_timer   = 0.0 # seconds remaining
+        self._last_power_score  = 0   # track when last power was earned
+
+        # Confetti
+        self.hud.confetti.clear()
 
     # ── derived properties ──────────────────────────────────────
 
@@ -67,13 +75,15 @@ class Game:
 
     @property
     def _speed_display(self) -> int:
-        """Display speed as a 'km/h' number for the gauge."""
         return int(60 + self._speed_pct * 220)
 
     @property
     def _spawn_interval(self) -> int:
-        """Frames between spawns — decreases with level."""
         return max(30, 90 - self.level * 6)
+
+    @property
+    def is_invincible(self) -> bool:
+        return self.invincible_timer > 0
 
     # ── per-frame logic ─────────────────────────────────────────
 
@@ -84,6 +94,10 @@ class Game:
         # Smooth lane transition
         diff = self.player_target_x - self.player_x
         self.player_x += diff * 0.2
+
+        # Tick invincibility
+        if self.invincible_timer > 0:
+            self.invincible_timer = max(0, self.invincible_timer - dt)
 
         # Spawn enemies
         self.spawn_cd -= 1
@@ -100,13 +114,23 @@ class Game:
                 self.level = 1 + self.score // 5
                 play_pass_sound()
                 self.hud.add_popup("+1", e.x + e.width // 2, e.y)
+
+                # Award boost power every 50 points
+                if self.score >= 50 and self.score // 50 > self._last_power_score // 50:
+                    self.boost_powers += 1
+                    self._last_power_score = self.score
+                    self.hud.add_popup("BOOST +1!", WIDTH // 2 - 40,
+                                       HEIGHT // 2, (200, 140, 255))
+
+                # Confetti every 20 points
                 if self.score % 20 == 0:
-                    self.party_timer = 80
+                    self.hud.spawn_confetti(60)
 
         self.enemies = [e for e in self.enemies if e.y < HEIGHT + e.height]
 
-        # Update popups
+        # Update popups & confetti
         self.hud.update_popups(dt)
+        self.hud.update_confetti(dt)
 
     def _spawn(self):
         taken = {e.lane for e in self.enemies if e.y < e.height + 30}
@@ -115,11 +139,13 @@ class Game:
             self.enemies.append(Enemy(random.choice(free)))
 
     def _collide(self) -> bool:
+        if self.is_invincible:
+            return False
+
         px, py = self.player_x, self.player_y
         pw, ph = CAR_W, CAR_H
         for e in self.enemies:
             ex, ew, eh = e.x, e.width, e.height
-            # AABB overlap with some tolerance
             overlap_x = (px + pw - 10 > ex + 10) and (ex + ew - 10 > px + 10)
             overlap_y = (py + ph - 10 > e.y + 10) and (e.y + eh - 10 > py + 10)
             if overlap_x and overlap_y:
@@ -127,7 +153,6 @@ class Game:
         return False
 
     def _handle_input(self) -> str | None:
-        """Return 'quit' to exit, None to keep playing."""
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return "quit"
@@ -144,6 +169,12 @@ class Game:
                         self.player_lane = new
                         self.player_target_x = lane_car_x(self.player_lane)
                         play_lane_switch_sound()
+                elif event.key == pygame.K_UP:
+                    # Activate boost
+                    if self.boost_powers > 0 and not self.is_invincible:
+                        self.boost_powers -= 1
+                        self.invincible_timer = self.INVINCIBLE_DURATION
+                        self.hud.spawn_confetti(40)
                 elif event.key == pygame.K_q:
                     return "quit"
         return None
@@ -163,7 +194,16 @@ class Game:
         # Speed lines behind player
         self.renderer.draw_speed_lines(self.player_x, self.player_y, self.level)
 
-        # Player car
+        # Player car (with invincibility glow)
+        if self.is_invincible:
+            # Draw a pulsing glow around the player
+            pulse = abs(pygame.time.get_ticks() % 500 - 250) / 250.0
+            glow_alpha = int(60 + pulse * 80)
+            glow = pygame.Surface((CAR_W + 20, CAR_H + 20), pygame.SRCALPHA)
+            glow.fill((180, 80, 255, glow_alpha))
+            self.screen.blit(glow, (int(self.player_x) - 10,
+                                     int(self.player_y) - 10))
+
         self.renderer.draw_car(self.player_surface, self.player_x, self.player_y)
 
         # HUD
@@ -171,12 +211,18 @@ class Game:
         self.hud.draw_top_bar(self.screen, self.score, self.level,
                               self.best_score, cars_to_next)
         self.hud.draw_speedometer(self.screen, self._speed_pct, self._speed_display)
-        self.hud.draw_controls(self.screen)
+        self.hud.draw_controls(self.screen, self.boost_powers)
         self.hud.draw_popups(self.screen)
 
-        if self.party_timer > 0:
-            self.hud.draw_milestone(self.screen, 80 - self.party_timer)
-            self.party_timer -= 1
+        # Boost power indicator
+        self.hud.draw_power_indicator(self.screen, self.boost_powers)
+
+        # Booster active display
+        if self.is_invincible:
+            self.hud.draw_booster_active(self.screen, self.invincible_timer)
+
+        # Confetti (on top of everything)
+        self.hud.draw_confetti(self.screen)
 
         if self.crash_flash > 0:
             self.renderer.draw_crash_flash()
@@ -187,13 +233,11 @@ class Game:
     # ── crash sequence ──────────────────────────────────────────
 
     def _crash(self) -> str:
-        """Show crash + game over. Return 'restart', 'customize', or 'quit'."""
         is_new_best = self.score > self.best_score
         if is_new_best:
             self.best_score = self.score
         play_crash_sound()
 
-        # Flash effect
         for _ in range(6):
             self.renderer.draw_crash_flash()
             pygame.display.flip()
@@ -202,17 +246,16 @@ class Game:
             pygame.display.flip()
             pygame.time.delay(40)
 
-        # Game over screen loop
         while True:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     return "quit"
                 if event.type == pygame.KEYDOWN:
-                    if event.key in (pygame.K_r,):
+                    if event.key == pygame.K_r:
                         return "restart"
-                    if event.key in (pygame.K_c,):
+                    if event.key == pygame.K_c:
                         return "customize"
-                    if event.key in (pygame.K_q,):
+                    if event.key == pygame.K_q:
                         return "quit"
 
             self._draw_static_scene()
@@ -222,7 +265,6 @@ class Game:
             self.clock.tick(FPS)
 
     def _draw_static_scene(self):
-        """Draw the frozen game scene (no animation)."""
         self.renderer.draw_background()
         self.renderer.draw_lane_markings(self.scroll)
         self.renderer.draw_trees(self.scroll)
@@ -233,10 +275,6 @@ class Game:
     # ── public API ──────────────────────────────────────────────
 
     def play(self) -> str:
-        """
-        Run one game session.
-        Returns "restart" / "customize" / "quit".
-        """
         self._reset()
 
         while True:
