@@ -137,17 +137,17 @@ class PowerUp:
     Timer starts once the icon enters the visible screen (y >= 0).
     Disappears after LIFETIME seconds if not collected.
     """
-    __slots__ = ("lane", "y", "kind", "surface", "width", "height",
-                 "timer", "timer_started", "collected")
+    # width and height removed from __slots__ — always equal to SIZE (class constant)
+    __slots__ = ("lane", "y", "kind", "surface", "timer", "timer_started", "collected")
     LIFETIME = 2.0   # seconds visible before disappearing
     SIZE     = 36    # icon size in pixels
 
     def __init__(self, lane: int, kind: str):
-        self.lane         = lane
-        self.kind         = kind   # "fire" or "boost"
-        self.timer        = self.LIFETIME
+        self.lane          = lane
+        self.kind          = kind   # "fire" or "boost"
+        self.timer         = self.LIFETIME
         self.timer_started = False
-        self.collected    = False
+        self.collected     = False
 
         fire_surf, boost_surf = _load_powerup_surfaces()
         if kind == "fire":
@@ -155,9 +155,17 @@ class PowerUp:
         else:
             self.surface = boost_surf
 
-        self.width  = self.SIZE
-        self.height = self.SIZE
-        self.y      = float(-self.SIZE)   # start just above screen
+        self.y = float(-self.SIZE)   # start just above screen
+
+    @property
+    def width(self) -> int:
+        """Always SIZE — no per-instance storage needed."""
+        return self.SIZE
+
+    @property
+    def height(self) -> int:
+        """Always SIZE — no per-instance storage needed."""
+        return self.SIZE
 
     @property
     def x(self) -> float:
@@ -175,7 +183,8 @@ class PowerUp:
 
 
 class Enemy:
-    __slots__ = ("lane", "y", "surface", "width", "height", "passed")
+    # width and height removed from __slots__ — derived from surface via properties
+    __slots__ = ("lane", "y", "surface", "passed")
 
     def __init__(self, lane: int):
         self.lane   = lane
@@ -191,9 +200,17 @@ class Enemy:
             spec = EnemyCarFactory().create()
             self.surface = make_car_surface(spec.color, is_player=False)
 
-        self.width  = self.surface.get_width()
-        self.height = self.surface.get_height()
-        self.y      = float(-self.height)  # start above screen
+        self.y = float(-self.surface.get_height())  # start above screen
+
+    @property
+    def width(self) -> int:
+        """Derived from surface — no redundant per-instance storage."""
+        return self.surface.get_width()
+
+    @property
+    def height(self) -> int:
+        """Derived from surface — no redundant per-instance storage."""
+        return self.surface.get_height()
 
     @property
     def x(self) -> float:
@@ -203,7 +220,8 @@ class Enemy:
 
 class Tanker:
     """Special enemy that fires bomb projectiles after level 5."""
-    __slots__ = ("lane", "y", "surface", "width", "height", "passed",
+    # width and height removed from __slots__ — derived from surface via properties
+    __slots__ = ("lane", "y", "surface", "passed",
                  "fire_timer", "fire_interval", "burst_remaining", "burst_delay")
 
     def __init__(self, lane: int):
@@ -216,14 +234,22 @@ class Tanker:
             pool = _load_vehicles()
             surf = random.choice(pool) if pool else pygame.Surface((100, 80))
         self.surface = surf
-        self.width  = self.surface.get_width()
-        self.height = self.surface.get_height()
-        self.y      = float(-self.height)
+        self.y       = float(-self.surface.get_height())
 
-        self.fire_timer     = 0.0                          # fire on first visible frame
-        self.fire_interval  = random.uniform(1.2, 2.2)  # seconds between shots
+        self.fire_timer      = 0.0                       # fire on first visible frame
+        self.fire_interval   = random.uniform(1.2, 2.2) # seconds between shots
         self.burst_remaining = 0      # extra shots in current burst
-        self.burst_delay    = 0.0     # countdown for next burst shot
+        self.burst_delay     = 0.0    # countdown for next burst shot
+
+    @property
+    def width(self) -> int:
+        """Derived from surface — no redundant per-instance storage."""
+        return self.surface.get_width()
+
+    @property
+    def height(self) -> int:
+        """Derived from surface — no redundant per-instance storage."""
+        return self.surface.get_height()
 
     @property
     def x(self) -> float:
@@ -259,7 +285,8 @@ class Tanker:
 
 class Bomb:
     """Projectile fired by a Tanker toward the player."""
-    __slots__ = ("x", "y", "surface", "width", "height", "passed", "speed_bonus")
+    # width and height removed from __slots__ — derived from surface via properties
+    __slots__ = ("x", "y", "surface", "passed", "speed_bonus")
 
     def __init__(self, x: float, y: float):
         surf = _load_bomb()
@@ -269,13 +296,21 @@ class Bomb:
             surf = pygame.Surface((size, size), pygame.SRCALPHA)
             pygame.draw.circle(surf, (200, 60, 0), (size // 2, size // 2), size // 2)
             pygame.draw.circle(surf, (255, 160, 40), (size // 2 - 5, size // 2 - 5), size // 5)
-        self.surface = surf
-        self.width  = surf.get_width()
-        self.height = surf.get_height()
-        self.x      = x - self.width / 2   # center on given x
-        self.y      = float(y)
-        self.passed = False
-        self.speed_bonus = random.uniform(2.5, 4.5)   # extra px/frame above scroll
+        self.surface    = surf
+        self.x          = x - surf.get_width() / 2   # center on given x
+        self.y          = float(y)
+        self.passed     = False
+        self.speed_bonus = random.uniform(2.5, 4.5)  # extra px/frame above scroll
+
+    @property
+    def width(self) -> int:
+        """Derived from surface — no redundant per-instance storage."""
+        return self.surface.get_width()
+
+    @property
+    def height(self) -> int:
+        """Derived from surface — no redundant per-instance storage."""
+        return self.surface.get_height()
 
 
 class Bullet:

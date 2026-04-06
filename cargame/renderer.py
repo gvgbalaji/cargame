@@ -12,6 +12,7 @@ from .constants import (
     COL_ASPHALT, COL_ASPHALT_L, COL_SHOULDER, COL_LANE_MARK,
     COL_EDGE_MARK,
 )
+from .surface_cache import SurfaceCache
 
 _ASSET_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets")
 
@@ -243,8 +244,8 @@ class Renderer:
         if self._scene == SCENE_DAY:
             # Bright sun top-left area
             sx, sy = 80, 70
-            # Glow
-            glow = pygame.Surface((120, 120), pygame.SRCALPHA)
+            # Glow — reuse cached 120x120 surface
+            glow = SurfaceCache.get(120, 120)
             pygame.draw.circle(glow, (255, 240, 100, 50), (60, 60), 55)
             self.screen.blit(glow, (sx - 60, sy - 60))
             # Sun body
@@ -261,21 +262,22 @@ class Renderer:
                                  (rx, ry), (rx2, ry2), 2)
 
         elif self._scene == SCENE_SUNSET:
-            # Lower sun with orange glow
+            # Lower sun with orange glow — reuse cached 160x160 surface
             sx, sy = 90, 140
-            glow = pygame.Surface((160, 160), pygame.SRCALPHA)
+            glow = SurfaceCache.get(160, 160)
             pygame.draw.circle(glow, (255, 140, 40, 40), (80, 80), 70)
             self.screen.blit(glow, (sx - 80, sy - 80))
             pygame.draw.circle(self.screen, (255, 120, 30), (sx, sy), 28)
             pygame.draw.circle(self.screen, (255, 180, 80), (sx - 4, sy - 4), 12)
 
         else:  # NIGHT
-            # Stars (twinkle)
+            # Stars (twinkle) — reuse one cached surface per unique star diameter
             for sx, sy, sz in self._stars:
                 twinkle = abs(math.sin((ticks / 800.0) + sx * 0.1)) * 0.5 + 0.5
                 alpha = int(100 + twinkle * 155)
                 c = (200, 210, 255, alpha)
-                star_surf = pygame.Surface((sz * 2 + 1, sz * 2 + 1), pygame.SRCALPHA)
+                dim = sz * 2 + 1
+                star_surf = SurfaceCache.get(dim, dim)
                 pygame.draw.circle(star_surf, c, (sz, sz), sz)
                 self.screen.blit(star_surf, (sx - sz, sy - sz))
 
@@ -287,8 +289,8 @@ class Renderer:
             pygame.draw.circle(self.screen,
                                _SCENE_COLORS[SCENE_NIGHT]["sky_top"],
                                (mx + 10, my - 6), 22)
-            # Moon glow
-            glow = pygame.Surface((100, 100), pygame.SRCALPHA)
+            # Moon glow — reuse cached 100x100 surface
+            glow = SurfaceCache.get(100, 100)
             pygame.draw.circle(glow, (180, 200, 255, 25), (50, 50), 45)
             self.screen.blit(glow, (mx - 50, my - 50))
 
@@ -365,8 +367,8 @@ class Renderer:
         river_w = 55
         flow_offset = (ticks / 400.0) % (math.pi * 2)
 
-        # Draw river as a series of horizontal slices following zig-zag path
-        river_area = pygame.Surface((self.w - ROAD_RIGHT, self.h), pygame.SRCALPHA)
+        # Reuse a single cached surface for the river area (no per-frame allocation)
+        river_area = SurfaceCache.get(self.w - ROAD_RIGHT, self.h)
         for y in range(0, self.h, 2):
             # Zig-zag: combine two sine waves for a natural meander
             meander = math.sin((y + scroll * 0.4) * 0.012) * 35 \
@@ -492,7 +494,8 @@ class Renderer:
             ly = player_y + _CH + rng.randint(5, 40)
             length = rng.randint(20, 50 + level * 5)
             alpha = rng.randint(min(40, intensity), max(40, intensity))
-            line_surf = pygame.Surface((2, length), pygame.SRCALPHA)
+            # Reuse cached surface — fill with the correct alpha each time
+            line_surf = SurfaceCache.get(2, length)
             line_surf.fill((200, 220, 255, alpha))
             self.screen.blit(line_surf, (int(lx), int(ly)))
 
@@ -507,12 +510,13 @@ class Renderer:
             py = rng.randint(0, self.h)
             cx = self.road_curve(py, scroll)
             alpha = rng.randint(30, 120)
-            dot = pygame.Surface((3, 3), pygame.SRCALPHA)
+            # Reuse single cached 3x3 particle surface
+            dot = SurfaceCache.get(3, 3)
             dot.fill((255, 255, 255, alpha))
             self.screen.blit(dot, (int(px + cx), py))
 
     def draw_crash_flash(self):
         """Full-screen red flash overlay."""
-        flash = pygame.Surface((self.w, self.h), pygame.SRCALPHA)
+        flash = SurfaceCache.get(self.w, self.h)
         flash.fill((255, 30, 30, 120))
         self.screen.blit(flash, (0, 0))

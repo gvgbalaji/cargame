@@ -12,6 +12,7 @@ from .constants import (
     COL_HUD_BG, COL_HUD_BORDER, COL_HUD_TEXT, COL_HUD_ACCENT,
     COL_HUD_WARN, COL_HUD_GOOD, COL_HUD_GOLD, COL_HUD_DIM,
 )
+from .surface_cache import SurfaceCache
 
 _ASSET_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets")
 
@@ -35,7 +36,7 @@ _CONFETTI_COLORS = [
 
 
 class ConfettiParticle:
-    """A single confetti piece — pre-allocated, reusable."""
+    """A single confetti piece — pre-allocated, reusable (Object Pool member)."""
     __slots__ = ("x", "y", "vx", "vy", "color", "size", "rot", "rot_speed", "life")
 
     def __init__(self):
@@ -64,11 +65,70 @@ class ConfettiParticle:
     def draw(self, screen: pygame.Surface):
         alpha = max(0, min(255, int(self.life * 255)))
         s = self.size
-        surf = pygame.Surface((s, s), pygame.SRCALPHA)
+        # Reuse a cached surface instead of allocating a new one each frame
+        surf = SurfaceCache.get(s, s)
         c = (*self.color, alpha)
         pygame.draw.rect(surf, c, (0, 0, s, s))
         rotated = pygame.transform.rotate(surf, self.rot)
         screen.blit(rotated, (int(self.x), int(self.y)))
+
+
+class ConfettiPool:
+    """Object Pool for ConfettiParticle instances.
+
+    Pre-allocates a fixed pool of particles.  Spawn pulls from the available
+    list; when a particle expires it is returned to available rather than
+    garbage-collected.  This eliminates per-burst allocation churn.
+    """
+
+    def __init__(self, max_size: int = 300):
+        self._pool: list[ConfettiParticle] = [ConfettiParticle() for _ in range(max_size)]
+        self._active: list[ConfettiParticle] = []
+        self._available: list[ConfettiParticle] = list(self._pool)
+
+    def spawn(self, x: float, y: float) -> ConfettiParticle | None:
+        """Activate one particle from the pool and place it at (x, y)."""
+        if not self._available:
+            return None
+        p = self._available.pop()
+        p.reset(x, y)
+        self._active.append(p)
+        return p
+
+    def spawn_burst(self, count: int, cx: float, cy: float,
+                    vy_min: float = 2.0, vy_max: float = 6.0,
+                    vx_range: float = 4.0):
+        """Spawn up to `count` particles spread around (cx, cy)."""
+        for _ in range(count):
+            p = self.spawn(random.uniform(cx - 50, cx + 50),
+                           random.uniform(cy - 20, cy))
+            if p is None:
+                break
+            p.vy = random.uniform(vy_min, vy_max)
+            p.vx = random.uniform(-vx_range, vx_range)
+
+    def update(self, dt: float):
+        """Tick all active particles; return expired ones to the pool."""
+        still_active: list[ConfettiParticle] = []
+        for p in self._active:
+            if p.update(dt):
+                still_active.append(p)
+            else:
+                self._available.append(p)
+        self._active = still_active
+
+    def draw(self, screen: pygame.Surface):
+        for p in self._active:
+            p.draw(screen)
+
+    def clear(self):
+        """Return all active particles to the pool (e.g., on game reset)."""
+        self._available.extend(self._active)
+        self._active = []
+
+    @property
+    def active_count(self) -> int:
+        return len(self._active)
 
 
 class HUD:
@@ -88,8 +148,8 @@ class HUD:
         # Floating text popups
         self.popups: list[tuple[str, float, float, float, tuple]] = []
 
-        # Confetti particles (pre-allocate pool)
-        self.confetti: list[ConfettiParticle] = []
+        # Confetti — Object Pool (replaces the bare list + per-burst allocation)
+        self._confetti_pool = ConfettiPool(max_size=300)
 
         # Booster image
         self._booster_img: pygame.Surface | None = None
@@ -104,6 +164,22 @@ class HUD:
 
         # F1 fact — one random fact per game session
         self._fact_text = random.choice(_F1_FACTS)
+
+        # ── Pre-rendered static text labels (Flyweight for text) ──────────
+        # These never change, so render once and reuse every frame.
+        self._lbl_score      = self.font_small.render("SCORE",     True, COL_HUD_DIM)
+        self._lbl_level      = self.font_small.render("LEVEL",     True, COL_HUD_DIM)
+        self._lbl_kmh        = self.font_tiny.render("KM/H",       True, COL_HUD_DIM)
+        self._lbl_boost      = self.font_tiny.render("BOOST",      True, (200, 140, 255))
+        self._lbl_fire       = self.font_tiny.render("FIRE",       True, (100, 180, 255))
+        self._lbl_f1fact     = self.font_med.render("F1 FACT",     True, COL_HUD_ACCENT)
+        self._lbl_invincible = self.font_med.render("INVINCIBLE",  True, (255, 200, 60))
+        self._lbl_gameover   = self.font_large.render("GAME OVER", True, COL_HUD_WARN)
+        self._lbl_top5       = self.font_large.render("TOP  5",    True, COL_HUD_GOLD)
+        self._lbl_controls   = self.font_small.render(
+            "[A/\u2190] Left   [D/\u2192] Right   [\u2191] Boost   [\u2193/SPC] Fire   [M] Mute   [Q] Quit",
+            True, COL_HUD_DIM)
+        self._lbl_no_scores  = self.font_small.render("No scores yet!", True, COL_HUD_DIM)
 
     def _load_hud_images(self):
         specs = [
@@ -137,7 +213,8 @@ class HUD:
     @staticmethod
     def _draw_panel(screen: pygame.Surface, rect: pygame.Rect,
                     alpha: int = 180, border_color=COL_HUD_BORDER):
-        panel = pygame.Surface((rect.w, rect.h), pygame.SRCALPHA)
+        # Reuse a cached surface instead of allocating a new one each call
+        panel = SurfaceCache.get(rect.w, rect.h)
         pygame.draw.rect(panel, (10, 10, 15, alpha), (0, 0, rect.w, rect.h),
                          border_radius=10)
         pygame.draw.rect(panel, border_color, (0, 0, rect.w, rect.h),
@@ -160,8 +237,8 @@ class HUD:
         else:
             text_x = sx + 12
 
-        screen.blit(self.font_small.render("SCORE", True, COL_HUD_DIM),
-                    (text_x, 14))
+        # Use pre-rendered static label instead of re-rendering "SCORE" every frame
+        screen.blit(self._lbl_score, (text_x, 14))
         score_val = self.font_large.render(str(score), True, COL_HUD_TEXT)
         screen.blit(score_val, (text_x, 32))
         screen.blit(self.font_tiny.render(f"BEST  {best}", True, COL_HUD_GOLD),
@@ -181,8 +258,8 @@ class HUD:
         else:
             lvl_text_x = lx + 12
 
-        screen.blit(self.font_small.render("LEVEL", True, COL_HUD_DIM),
-                    (lvl_text_x, 14))
+        # Use pre-rendered static "LEVEL" label
+        screen.blit(self._lbl_level, (lvl_text_x, 14))
         screen.blit(self.font_large.render(f"{level:02d}", True, COL_HUD_GOLD),
                     (lvl_text_x, 32))
 
@@ -204,7 +281,8 @@ class HUD:
         cy = HEIGHT - 110
         radius = 75
 
-        panel = pygame.Surface((180, 180), pygame.SRCALPHA)
+        # Reuse cached panel surface for the speedometer background
+        panel = SurfaceCache.get(180, 180)
         pygame.draw.rect(panel, (10, 10, 15, 160), (0, 0, 180, 180),
                          border_radius=15)
         screen.blit(panel, (cx - 90, cy - 90))
@@ -255,18 +333,17 @@ class HUD:
         text_rect = speed_text.get_rect(center=(cx, cy + 30))
         screen.blit(speed_text, text_rect)
 
-        unit_text = self.font_tiny.render("KM/H", True, COL_HUD_DIM)
-        unit_rect = unit_text.get_rect(center=(cx, cy + 55))
-        screen.blit(unit_text, unit_rect)
+        # Use pre-rendered "KM/H" label
+        unit_rect = self._lbl_kmh.get_rect(center=(cx, cy + 55))
+        screen.blit(self._lbl_kmh, unit_rect)
 
     # ── bottom bar ──────────────────────────────────────────────
 
     def draw_controls(self, screen: pygame.Surface, boost: int = 0, shots: int = 0):
         self._draw_panel(screen, pygame.Rect(15, HEIGHT - 45, 500, 35),
                          alpha=140)
-        ctrl = "[A/\u2190] Left   [D/\u2192] Right   [\u2191] Boost   [\u2193/SPC] Fire   [M] Mute   [Q] Quit"
-        keys = self.font_small.render(ctrl, True, COL_HUD_DIM)
-        screen.blit(keys, (25, HEIGHT - 40))
+        # Use pre-rendered controls label
+        screen.blit(self._lbl_controls, (25, HEIGHT - 40))
 
     def draw_mute_icon(self, screen: pygame.Surface, sound_on: bool):
         """Draw a clickable speaker icon (matches MUTE_ICON_RECT)."""
@@ -275,7 +352,8 @@ class HUD:
         # Highlight on mouse hover
         mx, my = pygame.mouse.get_pos()
         hovered = self.MUTE_ICON_RECT.collidepoint(mx, my)
-        panel = pygame.Surface((size + 10, size + 10), pygame.SRCALPHA)
+        # Reuse cached panel surface
+        panel = SurfaceCache.get(size + 10, size + 10)
         bg_alpha = 200 if hovered else 160
         pygame.draw.rect(panel, (10, 10, 15, bg_alpha), (0, 0, size + 10, size + 10),
                          border_radius=7)
@@ -332,23 +410,35 @@ class HUD:
             surf.set_alpha(alpha)
             screen.blit(surf, (int(x), int(y)))
 
-    # ── confetti ────────────────────────────────────────────────
+    # ── confetti (pool-backed) ───────────────────────────────────
+
+    # Keep the public `confetti` attribute as a property pointing to the pool's
+    # active list so that any external code accessing hud.confetti still works.
+    @property
+    def confetti(self) -> list[ConfettiParticle]:
+        return self._confetti_pool._active
+
+    @confetti.setter
+    def confetti(self, value: list):
+        # Support legacy `hud.confetti.clear()` pattern used in game._reset()
+        if not value:
+            self._confetti_pool.clear()
 
     def spawn_confetti(self, count: int = 60):
         """Spawn a burst of confetti from the top of the screen."""
-        for _ in range(count):
-            p = ConfettiParticle()
-            p.reset(random.uniform(0, WIDTH), random.uniform(-20, 0))
-            p.vy = random.uniform(2, 6)
-            p.vx = random.uniform(-4, 4)
-            self.confetti.append(p)
+        self._confetti_pool.spawn_burst(
+            count,
+            cx=WIDTH / 2,
+            cy=0,
+            vy_min=2, vy_max=6,
+            vx_range=4,
+        )
 
     def update_confetti(self, dt: float):
-        self.confetti = [p for p in self.confetti if p.update(dt)]
+        self._confetti_pool.update(dt)
 
     def draw_confetti(self, screen: pygame.Surface):
-        for p in self.confetti:
-            p.draw(screen)
+        self._confetti_pool.draw(screen)
 
     # ── booster / invincible display ────────────────────────────
 
@@ -361,13 +451,13 @@ class HUD:
         bx = WIDTH - 150
         by = HEIGHT // 2 - 100
 
-        # Glowing panel behind
+        # Glowing panel behind — reuse cached surface
         pulse = abs(math.sin(pygame.time.get_ticks() * 0.005)) * 40 + 20
-        glow = pygame.Surface((160, 180), pygame.SRCALPHA)
+        glow = SurfaceCache.get(160, 180)
         glow.fill((160, 60, 220, int(pulse)))
         screen.blit(glow, (bx - 20, by - 10))
 
-        panel = pygame.Surface((160, 180), pygame.SRCALPHA)
+        panel = SurfaceCache.get(160, 180)
         pygame.draw.rect(panel, (20, 10, 40, 180), (0, 0, 160, 180),
                          border_radius=12)
         pygame.draw.rect(panel, (180, 80, 255), (0, 0, 160, 180),
@@ -377,10 +467,9 @@ class HUD:
         # Booster image
         screen.blit(self._booster_img, (bx - 1, by))
 
-        # "INVINCIBLE" text
-        inv_text = self.font_med.render("INVINCIBLE", True, (255, 200, 60))
-        screen.blit(inv_text,
-                    inv_text.get_rect(center=(bx + 60, by + 115)))
+        # Use pre-rendered "INVINCIBLE" label
+        screen.blit(self._lbl_invincible,
+                    self._lbl_invincible.get_rect(center=(bx + 60, by + 115)))
 
         # Countdown bar
         bar_w = 120
@@ -417,8 +506,9 @@ class HUD:
         self._draw_panel(screen, pygame.Rect(bx - 8, start_y - 8, icon_w + 18, panel_h),
                          alpha=150, border_color=(180, 80, 255))
 
-        lbl = self.font_tiny.render("BOOST", True, (200, 140, 255))
-        screen.blit(lbl, lbl.get_rect(center=(bx + icon_w // 2, start_y + 3)))
+        # Use pre-rendered "BOOST" label
+        screen.blit(self._lbl_boost,
+                    self._lbl_boost.get_rect(center=(bx + icon_w // 2, start_y + 3)))
 
         mini = pygame.transform.smoothscale(self._booster_img, (icon_w, icon_h))
         for i in range(max_show):
@@ -449,8 +539,9 @@ class HUD:
         self._draw_panel(screen, pygame.Rect(bx - 8, start_y - 8, icon_w + 18, panel_h),
                          alpha=150, border_color=(60, 140, 255))
 
-        lbl = self.font_tiny.render("FIRE", True, (100, 180, 255))
-        screen.blit(lbl, lbl.get_rect(center=(bx + icon_w // 2, start_y + 3)))
+        # Use pre-rendered "FIRE" label
+        screen.blit(self._lbl_fire,
+                    self._lbl_fire.get_rect(center=(bx + icon_w // 2, start_y + 3)))
 
         if self._firepower_icon:
             mini = self._firepower_icon
@@ -484,8 +575,8 @@ class HUD:
         py = HEIGHT - panel_h - 48
         self._draw_panel(screen, pygame.Rect(px, py, panel_w, panel_h))
 
-        screen.blit(self.font_med.render("F1 FACT", True, COL_HUD_ACCENT),
-                    (px + 10, py + 8))
+        # Use pre-rendered "F1 FACT" label
+        screen.blit(self._lbl_f1fact, (px + 10, py + 8))
 
         tip_color = COL_HUD_WARN if level > 8 else COL_HUD_GOOD
         words = self._fact_text.split()
@@ -510,7 +601,8 @@ class HUD:
     def draw_game_over(self, screen: pygame.Surface, score: int, level: int,
                        best: int, is_new_best: bool,
                        top5: list[tuple[int, int, str]] | None = None):
-        overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        # Full-screen overlay — reuse cached surface
+        overlay = SurfaceCache.get(WIDTH, HEIGHT)
         overlay.fill((0, 0, 0, 170))
         screen.blit(overlay, (0, 0))
 
@@ -519,13 +611,15 @@ class HUD:
         bx = WIDTH // 2 - box_w // 2 - 220
         by = HEIGHT // 2 - box_h // 2
 
-        box = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
+        # Reuse cached surface for the box
+        box = SurfaceCache.get(box_w, box_h)
         pygame.draw.rect(box, (15, 15, 25, 230), (0, 0, box_w, box_h), border_radius=15)
         pygame.draw.rect(box, COL_HUD_WARN, (0, 0, box_w, box_h), width=3, border_radius=15)
         screen.blit(box, (bx, by))
 
-        title = self.font_large.render("GAME OVER", True, COL_HUD_WARN)
-        screen.blit(title, title.get_rect(center=(bx + box_w // 2, by + 38)))
+        # Use pre-rendered "GAME OVER" label
+        screen.blit(self._lbl_gameover,
+                    self._lbl_gameover.get_rect(center=(bx + box_w // 2, by + 38)))
 
         pygame.draw.line(screen, COL_HUD_DIM,
                          (bx + 30, by + 62), (bx + box_w - 30, by + 62), 1)
@@ -563,16 +657,15 @@ class HUD:
         lbx = bx + box_w + 20
         lby = by
 
-        lb = pygame.Surface((lb_w, lb_h), pygame.SRCALPHA)
+        # Reuse cached surface for the leaderboard box
+        lb = SurfaceCache.get(lb_w, lb_h)
         pygame.draw.rect(lb, (10, 15, 30, 230), (0, 0, lb_w, lb_h), border_radius=15)
         pygame.draw.rect(lb, COL_HUD_GOLD, (0, 0, lb_w, lb_h), width=2, border_radius=15)
         screen.blit(lb, (lbx, lby))
 
-        screen.blit(
-            self.font_large.render("TOP  5", True, COL_HUD_GOLD),
-            self.font_large.render("TOP  5", True, COL_HUD_GOLD).get_rect(
-                center=(lbx + lb_w // 2, lby + 30)),
-        )
+        # Use pre-rendered "TOP  5" label
+        screen.blit(self._lbl_top5,
+                    self._lbl_top5.get_rect(center=(lbx + lb_w // 2, lby + 30)))
         pygame.draw.line(screen, COL_HUD_DIM,
                          (lbx + 20, lby + 52), (lbx + lb_w - 20, lby + 52), 1)
 
@@ -587,5 +680,5 @@ class HUD:
             screen.blit(self.font_tiny.render(dt, True, COL_HUD_DIM), (lbx + 210, ry + 4))
 
         if not rows:
-            no_data = self.font_small.render("No scores yet!", True, COL_HUD_DIM)
-            screen.blit(no_data, no_data.get_rect(center=(lbx + lb_w // 2, lby + lb_h // 2)))
+            screen.blit(self._lbl_no_scores,
+                        self._lbl_no_scores.get_rect(center=(lbx + lb_w // 2, lby + lb_h // 2)))

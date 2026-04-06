@@ -14,6 +14,7 @@ from .enemy import (Enemy, Tanker, Bomb, Bullet, PowerUp,
                     _load_vehicles, _load_tanker, _load_bomb, _load_powerup_surfaces)
 from .renderer import Renderer
 from .hud import HUD
+from .surface_cache import SurfaceCache
 from .sound import (play_crash_sound, play_lane_switch_sound, play_pass_sound,
                     set_sound_config, toggle_sound, is_sound_enabled,
                     play_background_music, stop_background_music)
@@ -360,10 +361,11 @@ class Game:
             cx = self.renderer.road_curve(b.y + b.height / 2, self.scroll)
             bx_draw = int(b.x + cx)
             by_draw = int(b.y)
-            # Pulsing glow ring
+            # Pulsing glow ring — reuse cached surface instead of allocating per bomb
             pulse = abs(math.sin(pygame.time.get_ticks() * 0.008)) * 30 + 20
             glow_r = b.width // 2 + 12
-            glow_surf = pygame.Surface((glow_r * 2, glow_r * 2), pygame.SRCALPHA)
+            glow_dim = glow_r * 2
+            glow_surf = SurfaceCache.get(glow_dim, glow_dim)
             pygame.draw.circle(glow_surf, (255, 100, 0, int(pulse * 3)),
                                (glow_r, glow_r), glow_r)
             self.screen.blit(glow_surf,
@@ -383,10 +385,11 @@ class Game:
             if pu.timer_started and pu.timer < 0.7:
                 if int(ticks / 120) % 2 == 0:
                     continue   # skip this frame = blink
-            # Glow ring behind icon
+            # Glow ring behind icon — reuse cached surface
             glow_color = (60, 120, 255, 80) if pu.kind == "fire" else (180, 80, 255, 80)
             glow_r = pu.SIZE // 2 + 10
-            glow_surf = pygame.Surface((glow_r * 2, glow_r * 2), pygame.SRCALPHA)
+            glow_dim = glow_r * 2
+            glow_surf = SurfaceCache.get(glow_dim, glow_dim)
             pygame.draw.circle(glow_surf, glow_color, (glow_r, glow_r), glow_r)
             self.screen.blit(glow_surf,
                              (px_draw + pu.SIZE // 2 - glow_r,
@@ -432,11 +435,11 @@ class Game:
         pcx = self.renderer.road_curve(self.player_y + CAR_H / 2, self.scroll)
         self.renderer.draw_headlights(self.player_x + pcx, self.player_y)
 
-        # Player car (with invincibility glow)
+        # Player car (with invincibility glow) — reuse cached surface
         if self.is_invincible:
             pulse = abs(pygame.time.get_ticks() % 500 - 250) / 250.0
             glow_alpha = int(60 + pulse * 80)
-            glow = pygame.Surface((CAR_W + 20, CAR_H + 20), pygame.SRCALPHA)
+            glow = SurfaceCache.get(CAR_W + 20, CAR_H + 20)
             glow.fill((180, 80, 255, glow_alpha))
             self.screen.blit(glow, (int(self.player_x + pcx) - 10,
                                      int(self.player_y) - 10))

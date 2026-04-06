@@ -11,6 +11,30 @@ from .constants import (
     COL_ASPHALT, COL_LANE_MARK, COL_GRASS,
 )
 from .cars import make_player_surface, PLAYER_STYLES
+from .surface_cache import SurfaceCache
+
+
+# ── Module-level font pool (Flyweight) ────────────────────────
+# Fonts are created once at import time and reused by both splash()
+# and customization_screen() instead of being re-created on every call.
+# These are initialised lazily (first access) so that pygame.font.init()
+# has already been called before we construct them.
+_fonts: dict[str, "pygame.font.Font | None"] = {}
+
+
+def _get_fonts() -> dict[str, "pygame.font.Font"]:
+    """Return (and lazily initialise) the shared font pool for screen functions."""
+    if not _fonts:
+        pygame.font.init()
+        _fonts["splash_title"]  = pygame.font.SysFont("Arial", 60, bold=True)
+        _fonts["splash_sub"]    = pygame.font.SysFont("Arial", 22)
+        _fonts["splash_small"]  = pygame.font.SysFont("Arial", 17)
+        _fonts["splash_key"]    = pygame.font.SysFont("Arial", 18, bold=True)
+        _fonts["cust_title"]    = pygame.font.SysFont("Arial", 36, bold=True)
+        _fonts["cust_med"]      = pygame.font.SysFont("Arial", 20, bold=True)
+        _fonts["cust_small"]    = pygame.font.SysFont("Arial", 16)
+        _fonts["cust_key"]      = pygame.font.SysFont("Arial", 14, bold=True)
+    return _fonts
 
 
 def _draw_bg(screen: pygame.Surface, tick: int):
@@ -30,8 +54,8 @@ def _draw_bg(screen: pygame.Surface, tick: int):
     pygame.draw.rect(screen, COL_GRASS, (0, 0, road_x, HEIGHT))
     pygame.draw.rect(screen, COL_GRASS, (road_x + 200, 0, WIDTH - road_x - 200, HEIGHT))
 
-    # Dark overlay for readability
-    overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+    # Dark overlay — reuse cached surface instead of allocating each frame
+    overlay = SurfaceCache.get(WIDTH, HEIGHT)
     overlay.fill((15, 15, 25, 180))
     screen.blit(overlay, (0, 0))
 
@@ -40,10 +64,23 @@ def splash(screen: pygame.Surface) -> bool:
     """Title screen. Returns True to continue, False to quit."""
     clock = pygame.time.Clock()
 
-    font_title  = pygame.font.SysFont("Arial", 60, bold=True)
-    font_sub    = pygame.font.SysFont("Arial", 22)
-    font_small  = pygame.font.SysFont("Arial", 17)
-    font_key    = pygame.font.SysFont("Arial", 18, bold=True)
+    # Use shared module-level font pool (Flyweight) — no per-call allocation
+    fonts = _get_fonts()
+    font_title = fonts["splash_title"]
+    font_sub   = fonts["splash_sub"]
+    font_small = fonts["splash_small"]
+    font_key   = fonts["splash_key"]
+
+    # Pre-render the static title surface (same every frame)
+    title = font_title.render("CAR DODGE", True, COL_HUD_GOLD)
+    title_rect = title.get_rect(center=(WIDTH // 2, 120))
+    # Pre-render the static glow surface at fixed size
+    _glow_w = title.get_width() + 60
+    _glow_h = title.get_height() + 30
+    # Pre-render the subtitle
+    sub = font_sub.render("Dodge oncoming traffic!", True, COL_HUD_DIM)
+    # Pre-render the start prompt
+    start_text = font_key.render("Press SPACE or ENTER to start...", True, COL_HUD_GOLD)
 
     tick = 0
     while True:
@@ -58,28 +95,22 @@ def splash(screen: pygame.Surface) -> bool:
 
         _draw_bg(screen, tick)
 
-        # Title with glow
-        title = font_title.render("CAR DODGE", True, COL_HUD_GOLD)
-        title_rect = title.get_rect(center=(WIDTH // 2, 120))
-
-        # Pulsing glow
+        # Title with pulsing glow — reuse cached glow surface
         pulse = abs(math.sin(tick * 0.03)) * 30 + 20
-        glow = pygame.Surface((title.get_width() + 60, title.get_height() + 30),
-                              pygame.SRCALPHA)
+        glow = SurfaceCache.get(_glow_w, _glow_h)
         glow.fill((255, 215, 0, int(pulse)))
         screen.blit(glow, glow.get_rect(center=title_rect.center))
         screen.blit(title, title_rect)
 
-        # Subtitle
-        sub = font_sub.render("Dodge oncoming traffic!", True, COL_HUD_DIM)
+        # Subtitle (pre-rendered, same every frame)
         screen.blit(sub, sub.get_rect(center=(WIDTH // 2, 180)))
 
-        # Instructions box
+        # Instructions box — reuse cached panel surface
         box_w, box_h = 420, 260
         bx = WIDTH // 2 - box_w // 2
         by = 220
 
-        panel = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
+        panel = SurfaceCache.get(box_w, box_h)
         pygame.draw.rect(panel, (10, 10, 15, 180), (0, 0, box_w, box_h),
                          border_radius=12)
         pygame.draw.rect(panel, COL_HUD_BORDER, (0, 0, box_w, box_h),
@@ -111,11 +142,9 @@ def splash(screen: pygame.Surface) -> bool:
             screen.blit(t, (bx + 25, ly))
             ly += 24
 
-        # Start prompt (pulsing)
+        # Start prompt (pulsing visibility)
         if (tick // 30) % 2 == 0:
-            start = font_key.render("Press SPACE or ENTER to start...",
-                                    True, COL_HUD_GOLD)
-            screen.blit(start, start.get_rect(center=(WIDTH // 2, HEIGHT - 60)))
+            screen.blit(start_text, start_text.get_rect(center=(WIDTH // 2, HEIGHT - 60)))
 
         pygame.display.flip()
         clock.tick(FPS)
@@ -133,10 +162,12 @@ def customization_screen(screen: pygame.Surface) -> tuple[int, str, bool]:
     Returns (style_index, sound_theme, curvy)."""
     clock = pygame.time.Clock()
 
-    font_title = pygame.font.SysFont("Arial", 36, bold=True)
-    font_med   = pygame.font.SysFont("Arial", 20, bold=True)
-    font_small = pygame.font.SysFont("Arial", 16)
-    font_key   = pygame.font.SysFont("Arial", 14, bold=True)
+    # Use shared module-level font pool (Flyweight) — no per-call allocation
+    fonts = _get_fonts()
+    font_title = fonts["cust_title"]
+    font_med   = fonts["cust_med"]
+    font_small = fonts["cust_small"]
+    font_key   = fonts["cust_key"]
 
     style_sel = 0
     sound_sel = 0
@@ -191,7 +222,7 @@ def customization_screen(screen: pygame.Surface) -> tuple[int, str, bool]:
         car_border = COL_HUD_ACCENT if car_active else COL_HUD_DIM
 
         car_panel = pygame.Rect(WIDTH // 2 - 440, 90, 280, 410)
-        panel_s = pygame.Surface((car_panel.w, car_panel.h), pygame.SRCALPHA)
+        panel_s = SurfaceCache.get(car_panel.w, car_panel.h)
         pygame.draw.rect(panel_s, (10, 10, 15, 180),
                          (0, 0, car_panel.w, car_panel.h), border_radius=12)
         pygame.draw.rect(panel_s, car_border,
@@ -233,7 +264,7 @@ def customization_screen(screen: pygame.Surface) -> tuple[int, str, bool]:
         snd_border = COL_HUD_ACCENT if snd_active else COL_HUD_DIM
 
         snd_panel = pygame.Rect(WIDTH // 2 - 140, 90, 280, 410)
-        panel_s2 = pygame.Surface((snd_panel.w, snd_panel.h), pygame.SRCALPHA)
+        panel_s2 = SurfaceCache.get(snd_panel.w, snd_panel.h)
         pygame.draw.rect(panel_s2, (10, 10, 15, 180),
                          (0, 0, snd_panel.w, snd_panel.h), border_radius=12)
         pygame.draw.rect(panel_s2, snd_border,
@@ -288,7 +319,7 @@ def customization_screen(screen: pygame.Surface) -> tuple[int, str, bool]:
         road_border = COL_HUD_ACCENT if road_active else COL_HUD_DIM
 
         road_panel = pygame.Rect(WIDTH // 2 + 160, 90, 280, 410)
-        panel_s3 = pygame.Surface((road_panel.w, road_panel.h), pygame.SRCALPHA)
+        panel_s3 = SurfaceCache.get(road_panel.w, road_panel.h)
         pygame.draw.rect(panel_s3, (10, 10, 15, 180),
                          (0, 0, road_panel.w, road_panel.h), border_radius=12)
         pygame.draw.rect(panel_s3, road_border,
@@ -322,7 +353,7 @@ def customization_screen(screen: pygame.Surface) -> tuple[int, str, bool]:
         rpy = road_panel.y + 140
         rpw, rph = 100, 220
         rpx = road_panel.centerx - rpw // 2
-        preview_s = pygame.Surface((rpw, rph), pygame.SRCALPHA)
+        preview_s = SurfaceCache.get(rpw, rph)
         # Mini road
         pygame.draw.rect(preview_s, COL_ASPHALT, (15, 0, 70, rph))
         # Lane markings
